@@ -1,0 +1,26 @@
+# 环境变量（含 API Key，绝对不要提交）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 运行时数据（用户画像/面经等本地数据，勿提交）
+data/*
+!data/.gitkeep

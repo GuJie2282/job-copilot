@@ -1,0 +1,9 @@
+# LangGraph: agent orchestration framework (state machine driven)
+langgraph>=0.2.0
+
+# LangChain LLM integration (OpenAI-compatible interface; works with DeepSeek/OpenAI/Qwen/GLM)
+langchain-openai>=0.2.0
+langchain-core>=0.3.0
+
+# Load config from .env
+python-dotenv>=1.0.0

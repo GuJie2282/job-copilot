@@ -1,0 +1,172 @@
+/**
+ * 全局样式
+ */
+@import './variables.scss';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: $text-primary;
+  background-color: $bg-light;
+  line-height: $line-height-normal;
+}
+
+// 容器
+.container {
+  width: 100%;
+  max-width: $container-lg;
+  margin: 0 auto;
+  padding: 0 $spacing-lg;
+}
+
+.container-sm {
+  width: 100%;
+  max-width: $container-sm;
+  margin: 0 auto;
+  padding: 0 $spacing-lg;
+}
+
+// 卡片样式
+.card {
+  background: $bg-white;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-md;
+  padding: $spacing-xl;
+}
+
+// 按钮样式
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-sm $spacing-lg;
+  border-radius: $radius-md;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-base ease;
+  border: none;
+  outline: none;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: $shadow-md;
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+.btn-primary {
+  background: $primary-color;
+  color: $bg-white;
+
+  &:hover {
+    background: $primary-dark;
+  }
+}
+
+.btn-secondary {
+  background: transparent;
+  color: $primary-color;
+  border: 1px solid $border-color;
+
+  &:hover {
+    border-color: $primary-color;
+    background: $primary-lighter;
+  }
+}
+
+// 输入框样式
+.input {
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid $border-color;
+  border-radius: $radius-md;
+  font-size: $font-size-base;
+  transition: border-color $transition-base ease;
+
+  &:focus {
+    outline: none;
+    border-color: $primary-color;
+    box-shadow: 0 0 0 3px rgba($primary-color, 0.1);
+  }
+
+  &:disabled {
+    background: $bg-gray;
+    cursor: not-allowed;
+  }
+
+  &.is-error {
+    border-color: $error;
+
+    &:focus {
+      box-shadow: 0 0 0 3px rgba($error, 0.1);
+    }
+  }
+}
+
+// 文本样式
+.text-primary {
+  color: $text-primary;
+}
+
+.text-secondary {
+  color: $text-secondary;
+}
+
+.text-success {
+  color: $success;
+}
+
+.text-warning {
+  color: $warning;
+}
+
+.text-error {
+  color: $error;
+}
+
+// 工具类
+.text-center {
+  text-align: center;
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mt-sm { margin-top: $spacing-sm; }
+.mt-md { margin-top: $spacing-md; }
+.mt-lg { margin-top: $spacing-lg; }
+.mt-xl { margin-top: $spacing-xl; }
+
+.mb-sm { margin-bottom: $spacing-sm; }
+.mb-md { margin-bottom: $spacing-md; }
+.mb-lg { margin-bottom: $spacing-lg; }
+.mb-xl { margin-bottom: $spacing-xl; }

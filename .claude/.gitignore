@@ -1,0 +1,17 @@
+# Claude Code 项目配置
+# =====================
+
+# 记忆文件（用户个人数据）
+memory/*.md
+
+# 技能脚本（可包含敏感信息）
+skills/*.md
+
+# 临时文件
+*.tmp
+*.log
+
+# 但保留配置文件和索引
+!settings.json
+!README.md
+!memory/MEMORY.md
