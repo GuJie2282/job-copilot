@@ -11,7 +11,7 @@
 所有端点遵循 RESTful 规范
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Request
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from typing import Any
@@ -21,6 +21,7 @@ from src.models.user import User
 from src.core.deps import get_current_user
 from src.core.limiter import limiter, SEND_CODE_RATE_LIMIT
 from src.core.security import create_access_token, create_refresh_token
+from src.services.code_service import send_verification_code as send_code_to_email  # 别名避免命名冲突
 from src.schemas.auth import (
     LoginRequest,
     RegisterRequest,
@@ -50,11 +51,11 @@ security = HTTPBearer()
     response_model=LoginResponse,
     status_code=status.HTTP_201_CREATED,
     summary="用户注册",
-    description="用户通过邮箱和验证码注册账户，成功后返回用户信息和 Token"
+    description="用户通过邮箱和验证码注册账户，成功后返回用户信息和 Token",
 )
 async def register(
     register_data: RegisterRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ) -> Any:
     """
     用户注册
@@ -74,33 +75,23 @@ async def register(
     异常：
         400: 邮箱已注册、验证码无效
     """
-    # 注册用户
-    user = register_user(db, register_data)
-
-    # 生成 Token
-    access_token = create_access_token(data={
-        "user_id": str(user.id),
-        "email": user.email
-    })
-    refresh_token_str = create_refresh_token(data={"user_id": str(user.id)})
+    # 注册用户（服务层已生成Token）
+    user, access_token, refresh_token_str = register_user(db, register_data)
 
     # 返回响应
-    return LoginResponse(
-        user=user,
-        token=access_token,
-        refresh_token=refresh_token_str
-    )
+    return LoginResponse(user=user, token=access_token, refresh_token=refresh_token_str)
 
 
 @auth_router.post(
     "/login",
     response_model=LoginResponse,
     summary="用户登录",
-    description="用户通过邮箱和密码登录，成功后返回用户信息和 Token"
+    description="用户通过邮箱和密码登录，成功后返回用户信息和 Token",
 )
 async def login(
     login_data: LoginRequest,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
 ) -> Any:
     """
     用户登录
@@ -112,6 +103,7 @@ async def login(
 
     参数：
         login_data: 登录数据（邮箱、密码）
+        request: FastAPI请求对象
 
     返回：
         LoginResponse: 用户信息 + Access Token + Refresh Token
@@ -120,15 +112,11 @@ async def login(
         401: 邮箱或密码错误
         403: 账户已被禁用
     """
-    # 登录用户
-    user, access_token, refresh_token_str = login_user(db, login_data)
+    # 登录用户（传递request以获取IP地址）
+    user, access_token, refresh_token_str = login_user(db, login_data, request)
 
     # 返回响应
-    return LoginResponse(
-        user=user,
-        token=access_token,
-        refresh_token=refresh_token_str
-    )
+    return LoginResponse(user=user, token=access_token, refresh_token=refresh_token_str)
 
 
 @auth_router.post(
@@ -139,6 +127,7 @@ async def login(
 )
 @limiter.limit(SEND_CODE_RATE_LIMIT)  # 限流：每分钟 5 次
 async def send_verification_code(
+    request: Request,  # slowapi 限流需要 request 对象
     request_data: SendCodeRequest,
     db: Session = Depends(get_db)
 ) -> Any:
@@ -155,9 +144,12 @@ async def send_verification_code(
         - 同一邮箱 5 分钟内只能发送一次
         - 验证码有效期 5 分钟
     """
-    # 发送验证码
-    send_verification_code(db, request_data.email)
+    print(f"[DEBUG] 收到验证码请求，邮箱: {request_data.email}")  # 调试日志
 
+    # 发送验证码
+    send_code_to_email(db, request_data.email)  # 使用别名调用 service 函数
+
+    print(f"[DEBUG] 验证码已发送到: {request_data.email}")  # 调试日志
     return {"message": "验证码已发送"}
 
 
@@ -196,13 +188,15 @@ async def logout(
 )
 async def refresh_access_token(
     refresh_data: RefreshTokenRequest,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
 ) -> Any:
     """
     刷新 Token
 
     参数：
         refresh_data: Refresh Token
+        request: FastAPI请求对象
 
     返回：
         RefreshTokenResponse: 新的 Access Token + 新的 Refresh Token
@@ -214,11 +208,10 @@ async def refresh_access_token(
         - 刷新后生成新的 Refresh Token（旧 Token 失效）
         - Token 轮换机制提高安全性
     """
-    # 刷新 Token
-    new_access_token, new_refresh_token = refresh_token(db, refresh_data.refresh_token)
-
-    return RefreshTokenResponse(
-        token=new_access_token,
-        refresh_token=new_refresh_token
+    # 刷新 Token（传递request以获取IP地址）
+    new_access_token, new_refresh_token = refresh_token(
+        db, refresh_data.refresh_token, request
     )
+
+    return RefreshTokenResponse(token=new_access_token, refresh_token=new_refresh_token)
 

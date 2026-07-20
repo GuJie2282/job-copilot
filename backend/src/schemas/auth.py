@@ -29,15 +29,18 @@ class LoginRequest(BaseModel):
     属性：
         email: 用户邮箱（必须符合邮箱格式）
         password: 用户密码（至少 6 个字符）
+        remember_me: 是否记住我（勾选则 Refresh Token 有效期延长到 30 天，默认 False）
     """
     email: EmailStr = Field(..., description="用户邮箱")
     password: str = Field(..., min_length=6, max_length=100, description="用户密码")
+    remember_me: bool = Field(default=False, description="是否记住我（延长登录态有效期）")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "email": "zhangsan@example.com",
-                "password": "password123"
+                "password": "password123",
+                "remember_me": False
             }
         }
 

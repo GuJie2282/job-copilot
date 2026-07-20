@@ -21,6 +21,8 @@ dist/
 .DS_Store
 Thumbs.db
 
-# 运行时数据（用户画像/面经等本地数据，勿提交）
+# 运行时数据（用户画像/面经/面试会话状态等本地数据，勿提交）
 data/*
 !data/.gitkeep
+# 面试会话状态库（checkpointer 持久化，运行时生成）
+backend/interview_checkpoints.db

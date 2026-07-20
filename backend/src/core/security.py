@@ -12,6 +12,7 @@
 - Token 包含最小必要信息
 """
 
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
@@ -19,6 +20,8 @@ from passlib.context import CryptContext
 from fastapi import HTTPException, status
 import os
 import uuid
+
+logger = logging.getLogger(__name__)
 
 # ==================== 密码哈希配置 ====================
 
@@ -44,7 +47,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     示例：
         is_valid = verify_password("user_password", "$2b$12$...")
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        result = pwd_context.verify(plain_password, hashed_password)
+        logger.debug("password_verified", extra={"success": result})
+        return result
+    except Exception as e:
+        logger.error("password_verify_error", extra={"error": str(e)}, exc_info=True)
+        return False
 
 
 def get_password_hash(password: str) -> str:
@@ -72,7 +81,10 @@ def get_password_hash(password: str) -> str:
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-jwt-key-change-this-in-production-min-32-chars")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
-REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+# 不勾选"记住我"时 Refresh Token 的有效期（默认 1 天，临时登录）
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "1"))
+# 勾选"记住我"时 Refresh Token 的有效期（默认 30 天，长期免登录）
+REMEMBER_ME_REFRESH_TOKEN_DAYS = int(os.getenv("REMEMBER_ME_REFRESH_TOKEN_DAYS", "30"))
 
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
@@ -116,18 +128,24 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
 
     # 生成 JWT Token
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+    logger.debug("access_token_created", extra={"user_id": data.get("user_id", "unknown")})
+
     return encoded_jwt
 
 
-def create_refresh_token(data: Dict[str, Any]) -> str:
+def create_refresh_token(data: Dict[str, Any], expires_days: Optional[int] = None) -> str:
     """
     创建 Refresh Token
 
-    生成长期有效的 JWT Token（默认 7 天）
-    用于刷新 Access Token
+    生成长期有效的 JWT Token，用于刷新 Access Token。
+    有效期可按"记住我"动态调整：
 
     参数：
         data: 要编码到 Token 中的数据（包含 user_id 和 token_id）
+        expires_days: 自定义有效期（天数）。
+                      - 不传：用默认 REFRESH_TOKEN_EXPIRE_DAYS（不记住我，1 天）
+                      - 传 30：勾选了"记住我"，30 天免登录
 
     返回：
         str: JWT Token 字符串
@@ -142,8 +160,9 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
     token_id = str(uuid.uuid4())
     to_encode["token_id"] = token_id
 
-    # 设置过期时间（7 天）
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    # 设置过期时间（按传入的天数，或默认值）
+    days = expires_days if expires_days is not None else REFRESH_TOKEN_EXPIRE_DAYS
+    expire = datetime.utcnow() + timedelta(days=days)
     to_encode.update({
         "exp": expire,
         "iat": datetime.utcnow(),
@@ -152,6 +171,9 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
 
     # 生成 JWT Token
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+    logger.debug("refresh_token_created", extra={"user_id": data.get("user_id", "unknown"), "token_id": token_id, "expires_days": days})
+
     return encoded_jwt
 
 

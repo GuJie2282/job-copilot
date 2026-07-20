@@ -1,0 +1,279 @@
+"""
+LLM 配置和初始化
+
+功能：
+1. 配置 LLM（DeepSeek、OpenAI 等）
+2. 支持结构化输出（JSON Schema）
+3. 提供统一的 LLM 接口
+
+作者：求职 Copilot 项目
+日期：2026-07-03
+"""
+
+import os
+from typing import Optional, Any
+from langchain_openai import ChatOpenAI
+from langchain_core.language_models import BaseChatModel
+from pydantic import BaseModel
+
+
+# ============================================================================
+# 配置常量
+# ============================================================================
+
+# 默认配置
+DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_TEMPERATURE = 0.0  # 简历解析需要确定性输出
+DEFAULT_MAX_TOKENS = 4096
+
+# 支持的模型配置
+MODEL_CONFIGS = {
+    "deepseek-chat": {
+        "base_url": "https://api.deepseek.com",
+        "api_key_env": "LLM_API_KEY",
+        "default_temperature": 0.0,
+        "default_max_tokens": 4096,
+    },
+    "gpt-4o-mini": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "default_temperature": 0.0,
+        "default_max_tokens": 4096,
+    },
+    "glm-4-flash": {
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "api_key_env": "LLM_API_KEY",
+        "default_temperature": 0.0,
+        "default_max_tokens": 4096,
+    },
+}
+
+
+# ============================================================================
+# LLM 初始化函数
+# ============================================================================
+
+def get_llm(
+    model: Optional[str] = None,
+    temperature: float = DEFAULT_TEMPERATURE,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None
+) -> BaseChatModel:
+    """
+    获取 LLM 实例
+
+    Args:
+        model: 模型名称（如 "deepseek-chat"、"gpt-4o-mini"）
+        temperature: 温度参数（0.0-1.0，简历解析建议用 0.0）
+        max_tokens: 最大生成 tokens
+        api_key: API Key（可选，默认从环境变量读取）
+        base_url: API Base URL（可选，默认从配置读取）
+
+    Returns:
+        llm: LLM 实例
+
+    示例：
+        >>> llm = get_llm()  # 使用默认配置
+        >>> llm = get_llm(model="gpt-4o-mini")  # 使用 OpenAI
+        >>> llm = get_llm(temperature=0.7)  # 提高温度，增加创造性
+    """
+    # 使用默认模型
+    if model is None:
+        model = os.getenv("LLM_MODEL", DEFAULT_MODEL)
+
+    # 获取模型配置
+    model_config = MODEL_CONFIGS.get(model, MODEL_CONFIGS[DEFAULT_MODEL])
+
+    # 获取 API Key
+    if api_key is None:
+        api_key = os.getenv(model_config["api_key_env"])
+        if not api_key:
+            raise ValueError(
+                f"API Key not found. Please set {model_config['api_key_env']} "
+                f"in environment variables or .env file."
+            )
+
+    # 获取 Base URL
+    if base_url is None:
+        base_url = os.getenv("LLM_BASE_URL", model_config.get("base_url"))
+
+    # 创建 LLM 实例
+    llm = ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        api_key=api_key,
+        base_url=base_url,
+        timeout=120.0,  # LLM 调用超时：长简历 + 详情字段提取，glm-4-flash 生成大 JSON 较慢，30s 经常不够会误判失败
+    )
+
+    return llm
+
+
+def get_structured_llm(
+    model: Optional[str] = None,
+    schema: Optional[BaseModel] = None,
+    **kwargs
+) -> BaseChatModel:
+    """
+    获取支持结构化输出的 LLM 实例
+
+    Args:
+        model: 模型名称
+        schema: Pydantic BaseModel（用于结构化输出）
+        **kwargs: 其他参数（temperature、max_tokens 等）
+
+    Returns:
+        llm: 支持结构化输出的 LLM 实例
+
+    示例：
+        >>> class UserProfile(BaseModel):
+        ...     name: str
+        ...     email: str
+        >>> llm = get_structured_llm(schema=UserProfile)
+        >>> result = llm.invoke("简历文本")
+        >>> print(result.name)
+    """
+    llm = get_llm(model, **kwargs)
+
+    # 如果提供了 schema，使用 with_structured_output
+    if schema is not None:
+        # 尝试使用不同的方法来提高兼容性
+        try:
+            # 智谱模型可能需要明确指定方法
+            llm = llm.with_structured_output(schema, method=["json_mode", "function_calling"])
+        except Exception:
+            # 如果失败，回退到默认方式
+            llm = llm.with_structured_output(schema)
+
+    return llm
+
+
+# ============================================================================
+# 用户画像 JSON Schema
+# ============================================================================
+
+class UserProfile(BaseModel):
+    """
+    用户画像的数据模型（用于结构化输出）
+
+    用途：约束 LLM 输出格式，确保返回结构化数据
+    """
+
+    # 基础信息
+    name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    location: Optional[str] = None
+
+    # 教育背景
+    schools: Optional[list[str]] = None
+    degrees: Optional[list[str]] = None
+    majors: Optional[list[str]] = None
+    graduation_years: Optional[list[str]] = None
+
+    # 工作经历
+    companies: Optional[list[str]] = None
+    positions: Optional[list[str]] = None
+    durations: Optional[list[str]] = None
+    # 每段工作/实习经历的职责与成果详情（保留原文细节），与 companies 同序对应
+    work_descriptions: Optional[list[str]] = None
+
+    # 技能
+    technical_skills: Optional[list[str]] = None
+    soft_skills: Optional[list[str]] = None
+    languages: Optional[list[str]] = None
+
+    # 项目经验
+    project_names: Optional[list[str]] = None
+    project_roles: Optional[list[str]] = None
+    # 每个项目的内容、职责与成果详情（保留原文细节），与 project_names 同序对应
+    project_descriptions: Optional[list[str]] = None
+
+    # 个人总结与荣誉
+    self_summary: Optional[str] = None  # 个人总结 / 自我评价（保留原文）
+    achievements: Optional[list[str]] = None  # 荣誉、奖项、证书
+
+    # 求职目标
+    target_positions: Optional[list[str]] = None
+    target_companies: Optional[list[str]] = None
+    location_preference: Optional[str] = None
+    salary_range: Optional[str] = None
+    industry: Optional[str] = None
+
+
+# ============================================================================
+# 配置验证
+# ============================================================================
+
+def validate_config() -> tuple[bool, str]:
+    """
+    验证 LLM 配置是否正确
+
+    Returns:
+        (is_valid, message)
+        - is_valid: 配置是否有效
+        - message: 验证消息
+    """
+    # 检查 API Key
+    model = os.getenv("LLM_MODEL", DEFAULT_MODEL)
+    model_config = MODEL_CONFIGS.get(model, MODEL_CONFIGS[DEFAULT_MODEL])
+    api_key_env = model_config["api_key_env"]
+    api_key = os.getenv(api_key_env)
+
+    if not api_key:
+        return False, f"❌ API Key 未配置：请在 .env 文件中设置 {api_key_env}"
+
+    # 检查 Base URL
+    base_url = os.getenv("LLM_BASE_URL")
+    if not base_url and "base_url" in model_config:
+        base_url = model_config["base_url"]
+
+    if not base_url:
+        return False, f"❌ Base URL 未配置：请在 .env 文件中设置 LLM_BASE_URL"
+
+    # 尝试创建 LLM 实例
+    try:
+        llm = get_llm()
+        return True, f"✅ LLM 配置有效（模型：{model}）"
+    except Exception as e:
+        return False, f"❌ LLM 初始化失败：{str(e)}"
+
+
+# ============================================================================
+# 主函数（测试用）
+# ============================================================================
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("LLM 配置测试")
+    print("=" * 60)
+
+    # 测试配置验证
+    print("\n[TEST 1] 验证配置")
+    is_valid, message = validate_config()
+    print(message)
+
+    if is_valid:
+        # 测试创建 LLM 实例
+        print("\n[TEST 2] 创建 LLM 实例")
+        try:
+            llm = get_llm()
+            print(f"✓ LLM 实例创建成功")
+            print(f"  - 模型: {llm.model_name}")
+            print(f"  - 温度: {llm.temperature}")
+            print(f"  - 最大 tokens: {llm.max_tokens}")
+        except Exception as e:
+            print(f"✗ LLM 实例创建失败: {e}")
+
+        # 测试结构化输出
+        print("\n[TEST 3] 创建结构化输出 LLM")
+        try:
+            llm_structured = get_structured_llm(schema=UserProfile)
+            print(f"✓ 结构化输出 LLM 创建成功")
+            print(f"  - Schema: UserProfile")
+        except Exception as e:
+            print(f"✗ 结构化输出 LLM 创建失败: {e}")
+
+    print("\n" + "=" * 60)
