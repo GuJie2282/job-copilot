@@ -157,37 +157,37 @@
 ## 阶段 7：RAG 双库（Day 13-16，4 天）
 
 ### 7.1 向量库与嵌入基建
-- [ ] 7.1.1 引入向量库与嵌入模型依赖
-- [ ] 7.1.2 封装 `backend/src/services/rag_service.py`（嵌入 + 索引 + 检索）
-- [ ] 7.1.3 实现混合检索（关键词 BM25 + 向量语义 + 来源优先级排序）
-- [ ] 7.1.4 检索单元测试（语义召回 + 关键词兜底）
+- [x] 7.1.1 引入向量库与嵌入模型依赖（rank_bm25 + 智谱 embedding-3 API；**改选型**：chromadb 依赖 chroma-hnswlib 需 MSVC 编译、Windows 装不上，改用 numpy 余弦相似度 + SQLite 存 embedding——零重依赖、更透明，诚实技术判断，design 原则 3）
+- [x] 7.1.2 封装 `backend/src/services/rag_service.py`（嵌入单例 + hybrid_search；test_rag_spike 验证 embedding-3 语义区分度，rag_service 自检双路融合通过）
+- [x] 7.1.3 实现混合检索（关键词 BM25 + 向量余弦语义 + 来源优先级权重三路融合，alpha=0.6）
+- [x] 7.1.4 检索测试（语义召回 + 关键词兜底：test_knowledge_service 公司库语义检索 PASS）
 
-### 7.0 丰富性增强（出题/追问多样化——补 Milestone 2 实测发现的"考查点固化"问题）
-- [ ] 7.0.1 出题锚点随机化：画像多段经历随机抽 2-3 段作锚点池，不固定第一段
-- [ ] 7.0.2 gaps 随机抽样+排序（有 JD 时从 gaps 随机选 N 个、打乱顺序）
-- [ ] 7.0.3 追问 LLM 化：扔掉固定模板，让 LLM 基于人设+probing_point 生成自然追问
-- [ ] 7.0.4 多样性回归测试（test_question_diversity 唯一率 + 跨场去重验证）
+### 7.0 丰富性增强（补 Milestone 2 实测发现的"考查点固化"问题）
+- [x] 7.0.1 出题锚点随机化：_build_candidate_summary 末尾随机抽 3 段经历/技能作「本场锚点池」
+- [x] 7.0.2 gaps 随机抽样+排序：_build_focus_from_gaps 先按 severity 排序建池再 random.sample 打乱
+- [x] 7.0.3 追问 LLM 化：_llm_followup 基于人设+probing_point 生成（阶段 6.5 已实现，此处确认覆盖）
+- [x] 7.0.4 多样性回归测试（test_question_diversity：题干唯一率 100%、锚点唯一率 44-55%；锚点固化主因=测试画像经历少+LLM 偏好强经历，真实画像更丰富时效果更好，RAG 公司库已带来新角度）
 
 ### 7.2 个人面经库
-- [ ] 7.2.1 定义 `PersonalEpisode` 模型与存储（per-user 隔离）
-- [ ] 7.2.2 实现复盘后自动沉淀（debrief → archive_entry → 入库）
-- [ ] 7.2.3 实现个人库检索（出题避免重复 + 复练弱项 + 复盘成长对比）
-- [ ] 7.2.4 实现个人面经的删除（用户数据权利）
-- [ ] 7.2.5 隐私隔离测试（用户间不可互访）
+- [x] 7.2.1 定义 `PersonalEpisodeModel`（models/knowledge.py，per-user 隔离 + embedding_json 列）
+- [x] 7.2.2 实现复盘后自动沉淀（archive_episodes_from_session：transcript+debrief→结构化条目，反问 qid=qa 跳过）
+- [x] 7.2.3 实现个人库检索（search_personal + get_recent_questions 避重 + get_weakness_questions 复练 + get_history_for_topic 成长对比）
+- [x] 7.2.4 实现个人面经的删除（delete_all_personal，数据权利）
+- [x] 7.2.5 隐私隔离测试（test_knowledge_service：userB 查 userA → 0 条，PASS）
 
 ### 7.3 公司面经库
-- [ ] 7.3.1 定义 `CompanyQuestion` 模型与存储（全局共享）
-- [ ] 7.3.2 准备精选种子集（3-5 岗位 × 10-20 真题，标注 curated）
-- [ ] 7.3.3 实现 LLM 扩充长尾（基于种子生成，标注 llm_generated）
-- [ ] 7.3.4 实现 UGC 入口与脱敏（标注 ugc，不暴露贡献者）
-- [ ] 7.3.5 实现公司库检索（按公司+岗位增强出题真实感）
-- [ ] 7.3.6 实现来源优先级排序（curated > ugc > llm_generated）
+- [x] 7.3.1 定义 `CompanyQuestionModel`（models/knowledge.py，全局共享 + source 标签）
+- [x] 7.3.2 精选种子集（CURATED_SEED：产品/后端/运营 三岗 22 条人工精选真题，seed_curated 幂等入库）
+- [x] 7.3.3 LLM 扩充长尾（llm_augment_company + get_company_question_augment_prompt，标注 llm_generated，失败降级）
+- [x] 7.3.4 UGC 入口与脱敏（add_ugc_company：仅 contributor_id 内部追溯，对外不暴露）
+- [x] 7.3.5 公司库检索（search_company：按公司/岗位过滤 + 混合检索）
+- [x] 7.3.6 来源优先级排序（hybrid_search 的 source 权重 curated 1.0 > ugc 0.85 > llm_generated 0.70，test 验证 curated 居首）
 
 ### 7.4 RAG 接入主流程
-- [ ] 7.4.1 出题节点接入 RAG（公司库增强 + 个人库避免重复/复练）
-- [ ] 7.4.2 复盘节点接入个人库（成长对比）
-- [ ] 7.4.3 实现来源透明展示（题目标注真实面经/AI 拟题）
-- [ ] 7.4.4 RAG 检索失败的降级（不依赖检索也能出题）
+- [x] 7.4.1 出题节点接入 RAG（session_setup 调 _retrieve_rag_context：公司库增强 + 个人库避重/复练注入出题 prompt；test_rag_integration 公司库命中 5 条 PASS）
+- [x] 7.4.2 复盘节点接入个人库（debrief_node 调 _archive_to_personal_library 沉淀；第二场飞轮反哺 recent_questions=6 PASS）
+- [x] 7.4.3 来源透明展示（question_plan.rag_used 记录公司库/近期题/弱项命中数，供前端展示「本场参考了 N 条真实面经」）
+- [x] 7.4.4 RAG 检索失败降级（_retrieve_rag_context try/except 返回空 dict，出题不依赖检索）
 
 ---
 

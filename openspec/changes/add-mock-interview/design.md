@@ -251,6 +251,8 @@ answer 响应多态：
 
 **权衡**：混合检索实现比纯向量复杂。但召回稳定性是 RAG 可用性的前提。
 
+**实现调整（阶段 7 落地时）**：原定 Chroma+BGE 在 Windows 上 chromadb 需 MSVC 编译、本地 BGE 需下载约 100MB 权重，对部署不友好（违背"能跑起来"）。实际改用：**智谱 embedding-3 API**（复用 LLM_API_KEY，零下载，spike 实测长文本语义区分度优于 embedding-2）+ **SQLite 存 embedding（JSON 列）+ numpy 余弦相似度** + **rank_bm25**。面经库数据量极小（百级），此方案零重依赖、毫秒级检索、完全透明——契合设计原则 3「不为用而用」。数据飞轮壁垒来自数据私有 + 闭环，与向量库选型无关。test_rag_spike / test_knowledge_service / test_rag_integration 全部验证通过。
+
 ---
 
 ## 架构设计

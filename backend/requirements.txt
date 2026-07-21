@@ -48,5 +48,12 @@ langchain-core==0.3.28
 langgraph==0.2.53
 langgraph-checkpoint-sqlite==2.0.11  # 模拟面试会话状态持久化（抗重启）；pin 2.x 兼容 langgraph 0.2.53
 
+# RAG 面经库检索（阶段 7）
+# - 嵌入：智谱 embedding-3 API（复用 langchain-openai 的 OpenAIEmbeddings + LLM_API_KEY）
+# - 关键词检索：rank_bm25；向量检索：numpy 余弦相似度（embedding 存 SQLite JSON 列）
+# - 不用 chromadb：其依赖 chroma-hnswlib 在 Windows 需 MSVC 编译，对部署不友好；
+#   面经库数据量极小（百级），numpy 检索足够且更透明（诚实的技术判断，design 原则 3）
+rank_bm25>=0.2.2
+
 # Task Scheduling (for file cleanup)
 apscheduler==3.11.0

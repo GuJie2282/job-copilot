@@ -92,6 +92,10 @@ def session_setup_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 job_profile = row.job_profile_json
                 gaps = row.gaps_json
 
+        # 【7.4.1 出题接入 RAG】检索公司库（真实面经增强）+ 个人库（避免重复 + 复练弱项）
+        # 失败降级：RAG 检索任何异常都返回空 dict，出题不受影响（spec 7.4.4）
+        rag_context = _retrieve_rag_context(db, user_id, profile, gaps)
+
         # 出题
         packages, plan = generate_question_bank(
             profile=profile,
@@ -99,11 +103,13 @@ def session_setup_node(state: Dict[str, Any]) -> Dict[str, Any]:
             gaps=gaps,
             interview_type=interview_type,
             intensity=intensity,
+            rag_context=rag_context,
         )
 
         logger.info(
             f"面试 session_setup 完成：{len(packages)} 题，档位={intensity}，"
-            f"类型={interview_type}，JD={'有' if jd_result_id else '无'}"
+            f"类型={interview_type}，JD={'有' if jd_result_id else '无'}，"
+            f"RAG={'+'.join(k for k,v in rag_context.items() if v) or '无'}"
         )
 
         return {
@@ -405,6 +411,11 @@ def debrief_node(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     logger.info(f"面试复盘完成：{len(transcript)} 轮，平均分={avg}，详细字段={'有' if detail else '降级基础'}")
+
+    # 【7.4.2 复盘接入个人库】沉淀本场面经到个人库（数据飞轮：下次出题反哺）
+    # 失败不阻断复盘返回（spec：沉淀是 best-effort，复盘报告已生成）
+    _archive_to_personal_library(state, debrief)
+
     return {
         "interview_status": "finished",
         "debrief_report": debrief,
@@ -463,6 +474,77 @@ def _find_pkg(bank: list, qid: Optional[str]) -> Optional[Dict[str, Any]]:
         if p.get("qid") == qid:
             return p
     return None
+
+
+# ----------------------------------------------------------------------------
+# RAG 接入辅助（阶段 7.4）
+# ----------------------------------------------------------------------------
+
+def _retrieve_rag_context(db, user_id: str, profile: Dict[str, Any], gaps) -> Dict[str, Any]:
+    """
+    出题前 RAG 检索（spec 7.4.1）：公司库增强真实感 + 个人库避免重复/复练弱项。
+    任何异常都降级为空 dict（出题不依赖检索，spec 7.4.4）。
+    """
+    try:
+        from src.services.knowledge_service import (
+            search_company, get_recent_questions, get_weakness_questions,
+        )
+        rag: Dict[str, Any] = {}
+
+        # ── 公司库：按目标岗位 + 重点 gap 构造 query，检索真实面经 ──
+        targets = profile.get("target_positions") or []
+        position = targets[0] if targets else None
+        query_parts = [p for p in [position] if p]
+        for g in (gaps or [])[:3]:
+            if g.get("requirement"):
+                query_parts.append(g["requirement"])
+        query = " ".join(query_parts)
+        if query:
+            hits = search_company(db, query, top_k=5, position=position)
+            hints = [h.get("text") for h in hits if h.get("text")]
+            if hints:
+                rag["company_hints"] = hints[:5]
+
+        # ── 个人库：近期题（避免重复）+ 弱项（复练）——数据飞轮反哺 ──
+        recent = get_recent_questions(db, user_id, limit=8)
+        if recent:
+            rag["recent_questions"] = recent
+        weak = get_weakness_questions(db, user_id, limit=5)
+        if weak:
+            rag["weakness_hints"] = [w.get("text") for w in weak if w.get("text")][:5]
+
+        return rag
+    except Exception as e:
+        logger.warning(f"出题 RAG 检索失败，降级无 RAG：{type(e).__name__}: {e}")
+        return {}
+
+
+def _archive_to_personal_library(state: Dict[str, Any], debrief: Dict[str, Any]) -> None:
+    """
+    复盘后把 transcript 沉淀到个人面经库（spec 7.4.2 / 数据飞轮）。
+    失败仅告警，不阻断复盘（报告已生成，沉淀是 best-effort）。
+    """
+    try:
+        from src.services.knowledge_service import archive_episodes_from_session
+        user_id = state.get("user_id")
+        transcript = state.get("transcript") or []
+        if not user_id or not transcript:
+            return
+        session_id = state.get("session_id") or state.get("thread_id") or "unknown"
+        profile = state.get("profile_snapshot") or {}
+        bank = state.get("question_bank") or []
+        early = bool(state.get("early_terminated"))
+
+        db = SessionLocal()
+        try:
+            archive_episodes_from_session(
+                db, user_id, session_id, transcript, debrief, profile, bank,
+                early_terminated=early,
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"复盘沉淀个人库失败（不阻断复盘）：{type(e).__name__}: {e}")
 
 
 # ============================================================================

@@ -24,6 +24,7 @@ DB 读取由 session_setup 节点负责（阶段 3）。
 """
 
 import uuid
+import random
 import logging
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -148,16 +149,31 @@ def _build_candidate_summary(profile: Dict[str, Any]) -> str:
     if schools:
         parts.append(f"教育：{'、'.join(schools)}")
 
+    # 【7.0.1 锚点随机化】从画像多段经历/技能里随机抽 2-3 段作「本场锚点池」，
+    # 引导 LLM 围绕这些出题——避免每次都锚定第一段经历，导致考查点固化、措辞重复。
+    anchors = [f"工作·{d}" for d in work_descs if d] \
+            + [f"项目·{d}" for d in proj_descs if d] \
+            + [f"技能·{s}" for s in tech if s]
+    if anchors:
+        pool = random.sample(anchors, min(3, len(anchors)))
+        parts.append("【本场锚点池（随机抽取，请优先围绕这几段经历/技能出题）】\n"
+                     + "\n".join(f"  - {a}" for a in pool))
+
     return "\n".join(parts)
 
 
 def _build_focus_from_gaps(gaps: List[Dict[str, Any]]) -> str:
-    """有 JD 模式：从 Gap 清单构造考查重点。Gap 大的优先考。"""
+    """有 JD 模式：从 Gap 清单构造考查重点。Gap 大的优先考，但随机抽样避免每次同序。"""
     if not gaps:
         return "（无 Gap 信息，请按岗位常规要求出题）"
-    lines = []
     type_label = {"hard_skill": "硬技能", "soft_skill": "软技能", "implicit": "隐性偏好", "redline": "红线"}
-    for g in gaps[:8]:  # 取前 8 条重点
+    # 【7.0.2】先按严重度排序构建候选池（重的在前，保证重点被考），再随机抽样打乱顺序
+    # ——兼顾「重点考」与「多样性」，避免每次 gaps 顺序一致导致考查点固化。
+    sev_order = {"high": 0, "medium": 1, "low": 2}
+    pool = sorted(gaps, key=lambda g: sev_order.get(str(g.get("severity", "")).lower(), 3))
+    sampled = random.sample(pool[:10], min(8, len(pool[:10])))
+    lines = []
+    for g in sampled:
         t = type_label.get(g.get("type"), g.get("type", ""))
         req = g.get("requirement", "")
         sev = g.get("severity", "")
@@ -260,6 +276,9 @@ def _llm_generate_packages(
     interview_type: str,
     count: int,
     probing_limit: int,
+    company_hints: Optional[List[str]] = None,
+    recent_questions: Optional[List[str]] = None,
+    weakness_hints: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """调 LLM 生成考查包。任何失败抛异常，由上层降级。"""
     llm = get_llm(temperature=0.7)  # 出题适度创造性
@@ -269,6 +288,9 @@ def _llm_generate_packages(
         interview_type=interview_type,
         question_count=count,
         probing_limit=probing_limit,
+        company_hints=company_hints,
+        recent_questions=recent_questions,
+        weakness_hints=weakness_hints,
     )
     resp = invoke_llm_with_retry(llm, prompt)
     data = _extract_json(resp.content)
@@ -305,6 +327,7 @@ def generate_question_bank(
     gaps: Optional[List[Dict[str, Any]]] = None,
     interview_type: str = "full",
     intensity: str = "normal",
+    rag_context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     生成个性化面试题库 + 问答计划。
@@ -315,6 +338,10 @@ def generate_question_bank(
         gaps:           JD 差距清单（可选；有 JD 时作为考查重点）
         interview_type: 面试类型（behavioral/technical/case/motivation/full）
         intensity:      档位（short/normal/deep/full）
+        rag_context:    RAG 检索结果（可选，spec 7.4 出题接入 RAG）：
+                          {company_hints: List[str]   公司库真实面经（借鉴风格）
+                           recent_questions: List[str] 个人库近期题（避免重复）
+                           weakness_hints: List[str]   个人库弱项（复练）}
 
     Returns:
         (question_bank, question_plan):
@@ -327,9 +354,20 @@ def generate_question_bank(
 
     context = normalize_context(profile, job_profile, gaps)
 
+    # RAG 上下文（session_setup 已检索好传入；缺失/失败则为空，出题不受影响）
+    rag_context = rag_context or {}
+    company_hints = rag_context.get("company_hints") or None
+    recent_questions = rag_context.get("recent_questions") or None
+    weakness_hints = rag_context.get("weakness_hints") or None
+
     # LLM 生成（失败降级兜底）
     try:
-        packages = _llm_generate_packages(context, interview_type, count, probing_limit)
+        packages = _llm_generate_packages(
+            context, interview_type, count, probing_limit,
+            company_hints=company_hints,
+            recent_questions=recent_questions,
+            weakness_hints=weakness_hints,
+        )
         logger.info(f"出题成功（LLM），{len(packages)} 题")
     except Exception as e:
         logger.warning(f"出题 LLM 失败，降级通用题库：{type(e).__name__}: {e}")
@@ -347,6 +385,12 @@ def generate_question_bank(
         "has_qa_session": cfg["has_qa_session"],
         "intensity": intensity,
         "label": cfg["label"],
+        # 【7.4.3 来源透明】记录本场 RAG 命中数，供前端展示「本场参考了 N 条真实面经 / 避开 M 道近期题」
+        "rag_used": {
+            "company_hints": len(company_hints or []),
+            "recent_questions": len(recent_questions or []),
+            "weakness_hints": len(weakness_hints or []),
+        },
     }
 
     return packages, question_plan

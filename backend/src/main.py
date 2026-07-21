@@ -42,6 +42,7 @@ from src.models.base import Base, engine
 from src.models import user  # 导入模型以注册到 Base.metadata
 from src.models import profile  # 导入画像与匹配结果模型以注册到 Base.metadata
 from src.models import interview  # 导入面试会话模型以注册到 Base.metadata
+from src.models import knowledge  # 导入面经库模型（个人/公司）以注册到 Base.metadata
 
 # 创建数据库表（如果不存在）
 Base.metadata.create_all(bind=engine)

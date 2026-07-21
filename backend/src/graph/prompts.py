@@ -11,7 +11,7 @@ Prompt 模板管理
 """
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 
 # ============================================================================
@@ -547,6 +547,9 @@ def get_question_generation_prompt(
     interview_type: str,
     question_count: int,
     probing_limit: int,
+    company_hints: Optional[List[str]] = None,
+    recent_questions: Optional[List[str]] = None,
+    weakness_hints: Optional[List[str]] = None,
 ) -> str:
     """
     获取模拟面试出题 Prompt。
@@ -563,10 +566,25 @@ def get_question_generation_prompt(
         interview_type:    面试类型（behavioral/technical/case/motivation/full）
         question_count:    本场题量
         probing_limit:     每题追问上限（决定 probing_points 的数量，1-3）
+        company_hints:     RAG 公司库检索到的真实面经题（借鉴风格 + 增强真实感）
+        recent_questions:  用户近期练过的题（出题避免重复——数据飞轮：个人库反哺）
+        weakness_hints:    用户历史弱项考查点（建议本轮复练——数据飞轮：弱项复练）
 
     Returns:
         prompt 字符串，要求 LLM 输出 ```json``` 包裹的 QuestionPackage 列表。
     """
+    # RAG 上下文（条件拼接：有才显示）——对应 spec 7.4 出题接入 RAG（公司库增强 + 个人库避免重复/复练）
+    rag_section = ""
+    if company_hints:
+        _hints = "\n".join(f"  - {h}" for h in company_hints[:5])
+        rag_section += f"\n## 可参考的真实面经（借鉴风格与考查角度，勿原样照搬）\n{_hints}\n"
+    if recent_questions:
+        _recent = "\n".join(f"  - {q}" for q in recent_questions[:8])
+        rag_section += f"\n## 候选人近期练过的题（必须避免与这些重复，换角度/换经历切入）\n{_recent}\n"
+    if weakness_hints:
+        _weak = "\n".join(f"  - {w}" for w in weakness_hints[:5])
+        rag_section += f"\n## 候选人历史弱项考查点（建议本轮优先复练这些方向）\n{_weak}\n"
+
     prompt = f"""你是一位资深面试官。请为候选人生成一份个性化的模拟面试题库。
 
 ## 候选人画像
@@ -574,8 +592,7 @@ def get_question_generation_prompt(
 
 ## 本场考查重点
 {focus_areas}
-
-## 出题要求
+{rag_section}## 出题要求
 - 面试类型：{interview_type}
 - 题目数量：{question_count} 道
 - 每题可深挖程度：{probing_limit} 个追问方向（probing_points 数量上限 = {probing_limit}）
@@ -766,6 +783,36 @@ def get_followup_prompt(
 像真人面试官的口吻，不要机械模板，不要每次都用"关于你刚才的回答"开头。
 
 只输出追问这一句话本身，不要引号、不要解释、不要前缀标签。
+"""
+    return prompt
+
+
+def get_company_question_augment_prompt(
+    position: str,
+    count: int = 5,
+    company: Optional[str] = None,
+) -> str:
+    """
+    公司面经库「LLM 扩充长尾」Prompt（spec：基于种子 + 公开信息生成，标注 llm_generated）。
+
+    用途：某岗位公司库题量不足时，生成补充题填补长尾。
+    约束：生成的题要贴近真实面试风格（像 HR/业务面会问的），而非教科书题目。
+    """
+    scope = f"{company}的" if company else ""
+    prompt = f"""你是资深面试官，熟悉{scope}「{position}」岗位的真实面试。
+
+请生成 {count} 道该岗位【真实面试中高频出现】的面试题。要求：
+1. 贴近真实面试风格——像 HR 面、业务面、技术面真的会问的问题，不是教科书题目。
+2. 覆盖行为面（讲经历）、专业/技术面、案例/情景面、动机面等不同题型。
+3. 每题附「考察点」（一句话说明这题在考察什么）。
+
+输出 JSON 数组，格式：
+{{
+  "questions": [
+    {{"category": "behavioral|technical|case|motivation", "question": "面试题文本", "context": "考察点"}}
+  ]
+}}
+只输出 JSON，不要其它解释。
 """
     return prompt
 

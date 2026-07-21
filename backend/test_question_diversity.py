@@ -1,13 +1,15 @@
 """
-出题多样性验证（量化"每次模拟会不会问相同问题"）
-==================================================
+出题多样性验证（量化"每次模拟会不会问相同问题"）—— 阶段 7.0.4 回归测试
+===========================================================================
 
-同一画像 + 同一配置，连续出题 N 次，量化题目重复度：
-  - 完全相同题数
-  - 高度相似题数（前缀/关键词重合）
-  - 不同题数
+同一画像 + 同一配置，连续出题 N 次，量化多样性：
+  - 题干文本唯一率（措辞不重复）
+  - 锚点唯一率（7.0.1 锚点池随机化的直接验证——锚点每次不同 = 考查点不固化）
+  - 经典题关键词分布（同质化程度）
 
-预期：当前实现（temperature=0.7，无去重）会有一定重复，尤其经典题。
+【为什么测锚点】题干文本 100% 唯一容易（LLM 换个说法），
+但若每次都锚定同一段经历，考查点其实固化。锚点随机化（7.0.1）正是为此——
+从画像多段经历随机抽 2-3 段作锚点池，引导 LLM 围绕不同经历出题。
 
 作者：求职 Copilot 项目
 日期：2026-07-20
@@ -32,6 +34,8 @@ PROFILE = {
 GAPS = [
     {"type": "hard_skill", "requirement": "数据建模经验", "severity": "high"},
     {"type": "soft_skill", "requirement": "跨团队沟通", "severity": "medium"},
+    {"type": "hard_skill", "requirement": "AB 实验设计", "severity": "high"},
+    {"type": "implicit", "requirement": "抗压能力", "severity": "medium"},
 ]
 
 ROUNDS = 3  # 连续出题次数
@@ -39,48 +43,52 @@ ROUNDS = 3  # 连续出题次数
 
 def collect(label, use_jd):
     print(f"\n{'=' * 70}\n{label}：连续出题 {ROUNDS} 次（同画像同配置）\n{'=' * 70}")
-    all_stems = []
+    all_stems, all_anchors = [], []
     for i in range(ROUNDS):
         gaps = GAPS if use_jd else None
         packages, _ = generate_question_bank(PROFILE, gaps=gaps, interview_type="full", intensity="short")
         stems = [p["stem"] for p in packages]
+        anchors = [p.get("anchor") or "" for p in packages]
         all_stems.append(stems)
+        all_anchors.append(anchors)
         print(f"\n第{i+1}次：")
-        for s in stems:
-            print(f"  - {s[:55]}")
-    return all_stems
+        for s, a in zip(stems, anchors):
+            print(f"  - {s[:50]}")
+            print(f"      锚点：{a[:45]}")
+    return all_stems, all_anchors
 
 
-def analyze(all_stems):
-    """统计跨次重复：把所有题拉平，看唯一题占比。"""
-    flat = [s for stems in all_stems for s in stems]
-    unique = len(set(flat))
-    total = len(flat)
-    # 关键词视角：看经典题是否反复出现
+def analyze(all_stems, all_anchors):
+    """统计跨次多样性：题干唯一率、锚点唯一率、经典关键词分布。"""
+    flat_s = [s for stems in all_stems for s in stems]
+    flat_a = [a for anchors in all_anchors for a in anchors if a]
+    unique_s = len(set(flat_s))
+    unique_a = len(set(flat_a))
     classic_keywords = ["push", "推动", "团队", "缺点", "优点", "为什么", "职业规划", "挑战", "STAR"]
     classic_hits = {}
-    for s in flat:
+    for s in flat_s:
         for kw in classic_keywords:
             if kw in s:
                 classic_hits[kw] = classic_hits.get(kw, 0) + 1
-    return total, unique, classic_hits
+    return len(flat_s), unique_s, len(flat_a), unique_a, classic_hits
 
 
 def run():
-    nojd = collect("【无 JD 模式】", use_jd=False)
-    t1, u1, ch1 = analyze(nojd)
-    print(f"\n  → 共 {t1} 题，完全不同 {u1} 题（{u1*100//t1}% 唯一）")
-    print(f"  → 经典题关键词出现：{ch1}")
+    nojd_s, nojd_a = collect("【无 JD 模式】", use_jd=False)
+    t1, us1, ta1, ua1, ch1 = analyze(nojd_s, nojd_a)
+    print(f"\n  → 题干 {t1} 题 / 唯一 {us1}（{us1*100//t1}%）；锚点 {ta1} 个 / 唯一 {ua1}（{ua1*100//max(ta1,1)}%）")
+    print(f"  → 经典关键词出现：{ch1}")
 
-    jd = collect("【有 JD 模式】", use_jd=True)
-    t2, u2, ch2 = analyze(jd)
-    print(f"\n  → 共 {t2} 题，完全不同 {u2} 题（{u2*100//t2}% 唯一）")
-    print(f"  → 经典题关键词出现：{ch2}")
+    jd_s, jd_a = collect("【有 JD 模式】", use_jd=True)
+    t2, us2, ta2, ua2, ch2 = analyze(jd_s, jd_a)
+    print(f"\n  → 题干 {t2} 题 / 唯一 {us2}（{us2*100//t2}%）；锚点 {ta2} 个 / 唯一 {ua2}（{ua2*100//max(ta2,1)}%）")
+    print(f"  → 经典关键词出现：{ch2}")
 
     print(f"\n{'=' * 70}")
-    print("结论：")
-    print(f"  无JD 唯一率 {u1*100//t1}% | 有JD 唯一率 {u2*100//t2}%")
-    print("  （唯一率越低 = 越容易每次问相同/相似题；经典题关键词反复出现 = 题库同质化）")
+    print("结论（锚点唯一率 = 考查点多样性的直接指标）：")
+    print(f"  无JD：题干唯一 {us1*100//t1}% | 锚点唯一 {ua1*100//max(ta1,1)}%")
+    print(f"  有JD：题干唯一 {us2*100//t2}% | 锚点唯一 {ua2*100//max(ta2,1)}%")
+    print("  （锚点唯一率越高 = 越能围绕不同经历出题，考查点不固化）")
     print("=" * 70)
 
 
