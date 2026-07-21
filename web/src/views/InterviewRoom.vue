@@ -60,7 +60,7 @@
         v-model="answer"
         class="answer-input"
         placeholder="输入你的回答…（Ctrl/⌘ + Enter 发送）"
-        :disabled="submitting || !currentQuestion"
+        :disabled="!currentQuestion"
         rows="2"
         @keydown="onKeydown"
       />
