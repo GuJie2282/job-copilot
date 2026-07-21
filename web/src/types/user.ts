@@ -20,6 +20,7 @@ export interface User {
 export interface LoginCredentials {
   email: string;
   password: string;
+  rememberMe?: boolean;  // 记住我（勾选则后端发 30 天长期 Refresh Token）
 }
 
 /**
@@ -29,6 +30,7 @@ export interface RegisterData {
   name: string;
   email: string;
   password: string;
+  confirmPassword?: string;  // 确认密码（仅前端验证，不提交到后端）
   phone?: string;
   verificationCode: string;
 }
@@ -39,7 +41,7 @@ export interface RegisterData {
 export interface LoginResponse {
   user: User;
   token: string;
-  refreshToken?: string;
+  refresh_token: string;
 }
 
 /**

@@ -1,7 +1,9 @@
 /**
  * 全局样式
+ * 包含：reset、字体规则、设计 token→CSS 变量、Element Plus 主题桥接、基础工具类
  */
-@import './variables.scss';
+@use 'sass:color';
+@use './variables' as *;
 
 * {
   margin: 0;
@@ -16,12 +18,104 @@ html {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: $font-body;
   color: $text-primary;
   background-color: $bg-light;
   line-height: $line-height-normal;
 }
+
+// 标题统一宋体（签名级）—— 子组件标题未设字体，自动继承
+h1, h2, h3, h4, h5, h6 {
+  font-family: $font-heading;
+  font-weight: $font-weight-semibold;
+  color: $ink;
+  line-height: $line-height-tight;
+}
+
+// 数据 / 分数等宽对齐（匹配度、统计数字等）
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* =========================================================
+ * 设计 token → CSS 变量
+ * 从 variables.scss 迁出（variables 被全局注入会重复输出，这里只走一次）
+ * ========================================================= */
+:root {
+  --primary-color: #{$primary-color};
+  --primary-light: #{$primary-light};
+  --primary-dark: #{$primary-dark};
+  --primary-lighter: #{$primary-lighter};
+
+  --accent-color: #{$accent-color};
+  --accent-light: #{$accent-light};
+
+  --ink: #{$ink};
+  --ink-soft: #{$ink-soft};
+
+  --text-primary: #{$text-primary};
+  --text-secondary: #{$text-secondary};
+  --text-disabled: #{$text-disabled};
+
+  --bg-light: #{$bg-light};
+  --bg-white: #{$bg-white};
+  --bg-gray: #{$bg-gray};
+
+  --border-color: #{$border-color};
+
+  --success: #{$success};
+  --warning: #{$warning};
+  --error: #{$error};
+  --info: #{$primary-color};
+
+  /* ===== Element Plus 主题桥接：让 el-* 组件跟随本设计系统主色 =====
+   * primary / success / warning / danger 全套 light/dark 派生，
+   * 用 SCSS mix() 按 Element 同款算法生成，保证 hover/active 不失色 */
+  --el-color-primary: #{$primary-color};
+  --el-color-primary-light-3: #{color.mix(white, $primary-color, 30%)};
+  --el-color-primary-light-5: #{color.mix(white, $primary-color, 50%)};
+  --el-color-primary-light-7: #{color.mix(white, $primary-color, 70%)};
+  --el-color-primary-light-8: #{color.mix(white, $primary-color, 80%)};
+  --el-color-primary-light-9: #{color.mix(white, $primary-color, 90%)};
+  --el-color-primary-dark-2: #{color.mix(black, $primary-color, 20%)};
+
+  --el-color-success: #{$success};
+  --el-color-success-light-3: #{color.mix(white, $success, 30%)};
+  --el-color-success-light-5: #{color.mix(white, $success, 50%)};
+  --el-color-success-light-7: #{color.mix(white, $success, 70%)};
+  --el-color-success-light-8: #{color.mix(white, $success, 80%)};
+  --el-color-success-light-9: #{color.mix(white, $success, 90%)};
+
+  --el-color-warning: #{$warning};
+  --el-color-warning-light-3: #{color.mix(white, $warning, 30%)};
+  --el-color-warning-light-5: #{color.mix(white, $warning, 50%)};
+  --el-color-warning-light-7: #{color.mix(white, $warning, 70%)};
+  --el-color-warning-light-8: #{color.mix(white, $warning, 80%)};
+  --el-color-warning-light-9: #{color.mix(white, $warning, 90%)};
+
+  --el-color-danger: #{$error};
+  --el-color-danger-light-3: #{color.mix(white, $error, 30%)};
+  --el-color-danger-light-5: #{color.mix(white, $error, 50%)};
+  --el-color-danger-light-7: #{color.mix(white, $error, 70%)};
+  --el-color-danger-light-8: #{color.mix(white, $error, 80%)};
+  --el-color-danger-light-9: #{color.mix(white, $error, 90%)};
+
+  --el-color-error: #{$error};
+  --el-color-info: #{$text-secondary};
+
+  --el-border-radius-base: #{$radius-md};
+  --el-border-color: #{$border-color};
+  --el-border-color-light: #{$border-color};
+  --el-text-color-primary: #{$text-primary};
+  --el-text-color-regular: #{$text-primary};
+  --el-text-color-secondary: #{$text-secondary};
+  --el-fill-color-blank: #{$bg-white};
+}
+
+/* =========================================================
+ * 基础工具类
+ * ========================================================= */
 
 // 容器
 .container {
@@ -38,15 +132,15 @@ body {
   padding: 0 $spacing-lg;
 }
 
-// 卡片样式
+// 卡片（细边框文档感，替代堆叠阴影）
 .card {
   background: $bg-white;
+  border: 1px solid $border-color;
   border-radius: $radius-lg;
-  box-shadow: $shadow-md;
   padding: $spacing-xl;
 }
 
-// 按钮样式
+// 按钮基础
 .btn {
   display: inline-flex;
   align-items: center;
@@ -62,7 +156,6 @@ body {
 
   &:hover {
     transform: translateY(-1px);
-    box-shadow: $shadow-md;
   }
 
   &:active {
@@ -90,7 +183,7 @@ body {
   }
 }
 
-// 输入框样式
+// 输入框基础
 .input {
   width: 100%;
   padding: $spacing-sm $spacing-md;
@@ -119,47 +212,18 @@ body {
   }
 }
 
-// 文本样式
-.text-primary {
-  color: $text-primary;
-}
+// 文本色
+.text-primary { color: $text-primary; }
+.text-secondary { color: $text-secondary; }
+.text-success { color: $success; }
+.text-warning { color: $warning; }
+.text-error { color: $error; }
 
-.text-secondary {
-  color: $text-secondary;
-}
-
-.text-success {
-  color: $success;
-}
-
-.text-warning {
-  color: $warning;
-}
-
-.text-error {
-  color: $error;
-}
-
-// 工具类
-.text-center {
-  text-align: center;
-}
-
-.flex {
-  display: flex;
-}
-
-.flex-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.flex-between {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
+// 布局工具
+.text-center { text-align: center; }
+.flex { display: flex; }
+.flex-center { display: flex; align-items: center; justify-content: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
 
 .mt-sm { margin-top: $spacing-sm; }
 .mt-md { margin-top: $spacing-md; }
@@ -170,3 +234,143 @@ body {
 .mb-md { margin-bottom: $spacing-md; }
 .mb-lg { margin-bottom: $spacing-lg; }
 .mb-xl { margin-bottom: $spacing-xl; }
+
+/* =========================================================
+ * 认证页分屏布局（Login / Register 共用）
+ * 左：墨蓝品牌叙事区 · 右：表单区
+ * ========================================================= */
+.auth {
+  display: flex;
+  min-height: 100vh;
+  background: $bg-white;
+}
+
+.auth__brand {
+  flex: 0 0 44%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: $spacing-3xl $spacing-2xl;
+  background: $ink;
+  color: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+
+  // 左侧顶部一道琥珀细线，作为品牌签名
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background: $accent-color;
+  }
+}
+
+.brand-inner {
+  max-width: 420px;
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-bottom: $spacing-3xl;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1.5px solid $accent-color;
+  color: $accent-color;
+  font-family: $font-heading;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+  border-radius: $radius-md;
+}
+
+.brand-name {
+  font-family: $font-heading;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.brand-thesis {
+  font-size: $font-size-4xl;
+  font-weight: $font-weight-bold;
+  color: #fff;
+  line-height: 1.2;
+  margin-bottom: $spacing-lg;
+}
+
+.brand-sub {
+  font-size: $font-size-base;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: $spacing-3xl;
+}
+
+.brand-flow {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-md $spacing-xl;
+  padding: 0;
+  margin: 0;
+
+  li {
+    display: flex;
+    align-items: baseline;
+    gap: $spacing-sm;
+    font-size: $font-size-sm;
+    color: rgba(255, 255, 255, 0.75);
+  }
+
+  .num {
+    font-family: $font-mono;
+    color: $accent-color;
+    font-size: $font-size-xs;
+    letter-spacing: 0.05em;
+  }
+}
+
+.auth__panel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-2xl;
+}
+
+.panel-inner {
+  width: 100%;
+  max-width: 380px;
+}
+
+.panel-head {
+  margin-bottom: $spacing-xl;
+
+  h2 {
+    font-size: $font-size-2xl;
+    margin-bottom: $spacing-xs;
+  }
+
+  p {
+    color: $text-secondary;
+    font-size: $font-size-sm;
+  }
+}
+
+@media (max-width: 900px) {
+  .auth__brand {
+    display: none;
+  }
+
+  .auth__panel {
+    padding: $spacing-xl $spacing-lg;
+  }
+}

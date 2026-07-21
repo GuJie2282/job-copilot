@@ -14,3 +14,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// element-plus 的 locale 子模块（.mjs）没有类型声明文件，这里补一个声明
+declare module 'element-plus/dist/locale/zh-cn.mjs';

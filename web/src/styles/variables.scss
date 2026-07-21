@@ -1,62 +1,76 @@
 /**
- * 设计系统 - 色彩和样式变量
- * 基于需求文档的设计规范
+ * 设计系统 - 色彩与样式变量
+ * 视觉主题：「AI 求职诊断工作台」—— 冷静、结构化、专业顾问质感
+ *
+ * 说明：本文件被 vite.config.ts 的 additionalData 全局注入到每个 .scss，
+ * 因此任意组件 <style lang="scss"> 内可直接使用下面的 $token，无需 @use。
+ * （原 :root CSS 变量段已迁至 global.scss，避免被重复注入）
  */
 
-// 主色调 - 专业可信赖的蓝色
+// ===== 主色：专业可信赖的蓝（主交互） =====
 $primary-color: #2563eb;
 $primary-light: #3b82f6;
 $primary-dark: #1d4ed8;
 $primary-lighter: #dbeafe;
 
-// 辅助色 - 温暖鼓励的橙色
-$accent-color: #f59e0b;
+// ===== 墨蓝：标题文字 + 深色聚焦块（新增 · 签名色） =====
+$ink: #0f172a;
+$ink-soft: #1e293b;
+
+// ===== 琥珀：状态强调 / 推荐（从 #f59e0b 调深一档，更沉稳） =====
+$accent-color: #d97706;
 $accent-light: #fbbf24;
 
-// 中性色
-$text-primary: #1f2937;
-$text-secondary: #6b7280;
-$text-disabled: #9ca3af;
+// ===== 中性色（对齐墨蓝冷调） =====
+$text-primary: #0f172a;
+$text-secondary: #64748b;
+$text-disabled: #94a3b8;
 
-$bg-light: #f9fafb;
+$bg-light: #f8fafc;
 $bg-white: #ffffff;
-$bg-gray: #f3f4f6;
+$bg-gray: #f1f5f9;
 
-// 边框颜色
-$border-color: #e5e7eb;
-$border-light: #f3f4f6;
+// ===== 边框 =====
+$border-color: #e2e8f0;
+$border-light: #f1f5f9;
 
-// 状态色
+// ===== 状态色（统一替代散落的 Bootstrap / Flat UI 值） =====
 $success: #10b981;
 $success-light: #d1fae5;
-$warning: #f59e0b;
+$warning: #d97706;
 $warning-light: #fef3c7;
 $error: #ef4444;
 $error-light: #fee2e2;
-$info: #3b82f6;
+$info: #2563eb;
 $info-light: #dbeafe;
 
-// 阴影
-$shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-$shadow-md: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-$shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+// ===== 字体（签名级：标题宋体 / 正文黑体） =====
+$font-heading: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
+$font-body: 'PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+$font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 
-// 圆角
+// ===== 阴影（冷调，配墨蓝） =====
+$shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+$shadow-md: 0 1px 3px 0 rgba(15, 23, 42, 0.08), 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+$shadow-lg: 0 12px 24px -6px rgba(15, 23, 42, 0.12), 0 4px 8px -2px rgba(15, 23, 42, 0.06);
+
+// ===== 圆角 =====
 $radius-sm: 4px;
 $radius-md: 8px;
 $radius-lg: 12px;
 $radius-xl: 16px;
 $radius-full: 9999px;
 
-// 间距
+// ===== 间距 =====
 $spacing-xs: 4px;
 $spacing-sm: 8px;
 $spacing-md: 16px;
 $spacing-lg: 24px;
 $spacing-xl: 32px;
 $spacing-2xl: 48px;
+$spacing-3xl: 64px;
 
-// 字体大小
+// ===== 字号 =====
 $font-size-xs: 12px;
 $font-size-sm: 14px;
 $font-size-base: 16px;
@@ -64,30 +78,31 @@ $font-size-lg: 18px;
 $font-size-xl: 20px;
 $font-size-2xl: 24px;
 $font-size-3xl: 30px;
+$font-size-4xl: 40px;  // 新增：hero 巨字（匹配度分数等）
 
-// 字重
+// ===== 字重 =====
 $font-weight-normal: 400;
 $font-weight-medium: 500;
 $font-weight-semibold: 600;
 $font-weight-bold: 700;
 
-// 行高
+// ===== 行高 =====
 $line-height-tight: 1.25;
 $line-height-normal: 1.5;
 $line-height-relaxed: 1.75;
 
-// 过渡
+// ===== 过渡 =====
 $transition-fast: 150ms;
 $transition-base: 200ms;
 $transition-slow: 300ms;
 
-// 容器宽度
+// ===== 容器宽度 =====
 $container-sm: 640px;
 $container-md: 768px;
 $container-lg: 1024px;
 $container-xl: 1280px;
 
-// Z-index
+// ===== Z-index =====
 $z-dropdown: 1000;
 $z-sticky: 1020;
 $z-fixed: 1030;
@@ -95,29 +110,3 @@ $z-modal-backdrop: 1040;
 $z-modal: 1050;
 $z-popover: 1060;
 $z-tooltip: 1070;
-
-// 导出为 CSS 变量
-:root {
-  --primary-color: #{$primary-color};
-  --primary-light: #{$primary-light};
-  --primary-dark: #{$primary-dark};
-  --primary-lighter: #{$primary-lighter};
-
-  --accent-color: #{$accent-color};
-  --accent-light: #{$accent-light};
-
-  --text-primary: #{$text-primary};
-  --text-secondary: #{$text-secondary};
-  --text-disabled: #{$text-disabled};
-
-  --bg-light: #{$bg-light};
-  --bg-white: #{$bg-white};
-  --bg-gray: #{$bg-gray};
-
-  --border-color: #{$border-color};
-
-  --success: #{$success};
-  --warning: #{$warning};
-  --error: #{$error};
-  --info: #{$info};
-}

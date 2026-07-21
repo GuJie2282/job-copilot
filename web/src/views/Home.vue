@@ -1,314 +1,581 @@
 <template>
-  <div class="home-container">
-    <el-container>
-      <!-- 顶部导航 -->
-      <el-header class="header">
-        <div class="header-content">
-          <div class="logo">
-            <el-icon :size="32" color="#2563eb">
-              <UserFilled />
-            </el-icon>
-            <span class="logo-text">求职 Copilot</span>
+  <div class="home">
+    <main class="main">
+      <!-- 欢迎区 -->
+      <section class="welcome">
+        <p class="eyebrow">DASHBOARD</p>
+        <h1>你好，{{ userStore.userName }}</h1>
+        <p class="welcome-sub">这是你的求职作战看板。</p>
+      </section>
+
+      <!-- 画像加载中 -->
+      <div v-if="profileState === 'loading'" class="state-block">
+        <span class="spinner" />
+        <p>正在读取你的画像…</p>
+      </div>
+
+      <!-- 画像读取失败：错误 + 重试（不阻断下方链路） -->
+      <div v-else-if="profileState === 'error'" class="state-block">
+        <p class="state-title">画像读取失败</p>
+        <p class="state-sub">{{ profileError }}</p>
+        <button class="btn-primary" type="button" @click="loadProfile">重试</button>
+      </div>
+
+      <!-- 新用户：无画像 → 大 CTA -->
+      <div v-else-if="profileState === 'empty'" class="onboard">
+        <p class="onboard-eyebrow">开始你的求职清单</p>
+        <h2 class="onboard-title">先建立画像，AI 才能帮你匹配岗位、优化简历。</h2>
+        <button class="cta" type="button" @click="go('/resume-parser')">
+          开始建立画像 →
+        </button>
+      </div>
+
+      <!-- 有画像：作战看板（画像摘要 + 最近匹配） -->
+      <div v-else class="board">
+        <!-- 画像摘要卡：只显真实计数，不算完成度 -->
+        <section class="card">
+          <div class="card-head">
+            <p class="card-eyebrow">个人画像</p>
+            <button class="link" type="button" @click="go('/profile')">查看 / 完善 →</button>
           </div>
-          <div class="user-menu">
-          <el-dropdown @command="handleLogout">
-            <span class="user-name">
-              <el-avatar :size="32" class="avatar">
-                {{ userStore.userName.charAt(0) }}
-              </el-avatar>
-              <span>{{ userStore.userName }}</span>
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="logout">退出登录</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          </div>
-        </div>
-      </el-header>
-
-      <!-- 主要内容 -->
-      <el-main class="main-content">
-        <div class="welcome-section">
-          <h1>欢迎回来，{{ userStore.userName }}！</h1>
-          <p class="subtitle">你的求职教练已准备就绪</p>
-        </div>
-
-        <!-- 快捷入口卡片 -->
-        <div class="quick-actions">
-          <el-row :gutter="24">
-            <el-col :xs="24" :sm="12" :md="8">
-              <el-card class="action-card" shadow="hover">
-                <div class="card-content">
-                  <el-icon :size="48" color="#2563eb">
-                    <Document />
-                  </el-icon>
-                  <h3>JD 匹配</h3>
-                  <p>分析职位描述，了解匹配度</p>
-                </div>
-              </el-card>
-            </el-col>
-            <el-col :xs="24" :sm="12" :md="8">
-              <el-card class="action-card" shadow="hover">
-                <div class="card-content">
-                  <el-icon :size="48" color="#10b981">
-                    <Edit />
-                  </el-icon>
-                  <h3>简历优化</h3>
-                  <p>AI 智能优化，提升竞争力</p>
-                </div>
-              </el-card>
-            </el-col>
-            <el-col :xs="24" :sm="12" :md="8">
-              <el-card class="action-card" shadow="hover">
-                <div class="card-content">
-                  <el-icon :size="48" color="#f59e0b">
-                    <ChatDotSquare />
-                  </el-icon>
-                  <h3>模拟面试</h3>
-                  <p>真实场景练习，从容应对</p>
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
-        </div>
-
-        <!-- 求职进度看板 -->
-        <el-card class="progress-card" shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <h2>求职进度</h2>
+          <div class="stats">
+            <div class="stat">
+              <span class="stat-num tnum">{{ workCount }}</span>
+              <span class="stat-label">工作经历</span>
             </div>
-          </template>
-          <el-row :gutter="24" class="progress-stats">
-            <el-col :xs="12" :sm="6">
-              <div class="stat-item">
-                <div class="stat-value">0</div>
-                <div class="stat-label">已投递</div>
-              </div>
-            </el-col>
-            <el-col :xs="12" :sm="6">
-              <div class="stat-item">
-                <div class="stat-value">0</div>
-                <div class="stat-label">面试中</div>
-              </div>
-            </el-col>
-            <el-col :xs="12" :sm="6">
-              <div class="stat-item">
-                <div class="stat-value">0</div>
-                <div class="stat-label">Offer</div>
-              </div>
-            </el-col>
-            <el-col :xs="12" :sm="6">
-              <div class="stat-item">
-                <div class="stat-value">0%</div>
-                <div class="stat-label">通过率</div>
-              </div>
-            </el-col>
-          </el-row>
-        </el-card>
-      </el-main>
-    </el-container>
+            <div class="stat">
+              <span class="stat-num tnum">{{ skillCount }}</span>
+              <span class="stat-label">技能项</span>
+            </div>
+            <div class="stat">
+              <span class="stat-num tnum">{{ eduCount }}</span>
+              <span class="stat-label">教育经历</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 最近匹配卡 -->
+        <section class="card">
+          <div class="card-head">
+            <p class="card-eyebrow">最近匹配</p>
+            <button class="link" type="button" @click="go('/jd-matcher')">查看全部 →</button>
+          </div>
+          <div v-if="recentMatches.length > 0" class="match-list">
+            <div
+              v-for="m in recentMatches"
+              :key="m.id"
+              class="match-item"
+              @click="go('/jd-matcher')"
+            >
+              <span class="m-score tnum" :style="{ color: scoreColor(m.overall_score) }">
+                {{ m.overall_score ?? '-' }}
+              </span>
+              <span class="m-pos">{{ m.position_title || '未知岗位' }}</span>
+              <span class="m-time tnum">{{ formatTime(m.created_at) }}</span>
+            </div>
+          </div>
+          <div v-else class="match-empty">
+            <p>还没有匹配记录</p>
+            <button class="btn-primary sm" type="button" @click="go('/jd-matcher')">去匹配岗位</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- 下一步链路（加载中/空状态时不显示，避免与 CTA 重复） -->
+      <section v-if="profileState === 'ready' || profileState === 'error'" class="flow-wrap">
+        <p class="section-label">下一步</p>
+        <div class="flow">
+          <div
+            v-for="step in steps"
+            :key="step.id"
+            class="flow-item"
+            :class="{ 'is-open': step.open, 'is-soon': !step.open }"
+            @click="step.open && go(step.to)"
+          >
+            <div class="flow-no tnum">{{ step.no }}</div>
+            <div class="flow-body">
+              <h3>{{ step.title }}</h3>
+              <p>{{ step.desc }}</p>
+            </div>
+            <div class="flow-cta">
+              <span v-if="step.open" class="cta-open">进入 →</span>
+              <span v-else class="cta-soon">即将开放</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import { UserFilled, Document, Edit, ChatDotSquare } from '@element-plus/icons-vue';
-import { useUserStore } from '@/stores/user';
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import { getProfile } from '@/api/resume'
+import { matchHistory } from '@/api/jd'
 
-// 路由
-const router = useRouter();
+const router = useRouter()
+const userStore = useUserStore()
 
-// 状态管理
-const userStore = useUserStore();
+// 画像状态：loading / ready / empty / error
+const profileState = ref<'loading' | 'ready' | 'empty' | 'error'>('loading')
+const profileError = ref('')
+const profile = ref<any>(null)
 
-/**
- * 退出登录
- */
-const handleLogout = async (): Promise<void> => {
+// 最近匹配（最多 5 条）
+const recentMatches = ref<any[]>([])
+
+// 真实计数（用户拍板：不算完成度，只显真实条数）
+const workCount = computed(() => profile.value?.companies?.length ?? 0)
+const eduCount = computed(() => profile.value?.schools?.length ?? 0)
+const skillCount = computed(() => {
+  const p = profile.value || {}
+  return (
+    (p.technical_skills?.length || 0) +
+    (p.soft_skills?.length || 0) +
+    (p.languages?.length || 0)
+  )
+})
+
+// 求职四步链路：01/02 已实现，03/04 灰显（编号是真实求职顺序，故保留）
+const steps = [
+  { id: 1, no: '01', title: '建立画像', desc: '上传简历或粘贴文本，AI 自动提取你的个人画像。', open: true, to: '/resume-parser' },
+  { id: 2, no: '02', title: 'JD 匹配', desc: '粘贴目标岗位，AI 解析要求并给出匹配度与差距清单。', open: true, to: '/jd-matcher' },
+  { id: 3, no: '03', title: '简历优化', desc: '基于目标 JD，AI 定向优化简历的表达与亮点。', open: false, to: '' },
+  { id: 4, no: '04', title: '模拟面试', desc: 'AI 扮演面试官，真实场景练习并复盘。', open: true, to: '/interview/setup' }
+]
+
+/** 进入路由 */
+function go(to: string): void {
+  router.push(to)
+}
+
+/** 读取画像 */
+async function loadProfile(): Promise<void> {
+  profileState.value = 'loading'
+  profileError.value = ''
   try {
-    await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    });
-
-    await userStore.logout();
-    ElMessage.success('已退出登录');
-    router.push('/login');
-  } catch (error) {
-    // 用户取消操作
-    if (error !== 'cancel') {
-      console.error('退出登录失败:', error);
+    const res = await getProfile(userStore.userId)
+    if (res.status === 'success' && res.data) {
+      if (res.data.profile) {
+        profile.value = res.data.profile
+        profileState.value = 'ready'
+      } else {
+        profileState.value = 'empty'
+      }
+    } else {
+      profileState.value = 'error'
+      profileError.value = res.message || '读取失败，请稍后重试'
     }
+  } catch (e: any) {
+    profileState.value = 'error'
+    profileError.value = e?.message || '网络异常，请检查连接'
   }
-};
+}
+
+/** 读取最近匹配（静默失败：失败则匹配卡显示空态，不阻断页面） */
+async function loadMatches(): Promise<void> {
+  if (!userStore.userId) return
+  try {
+    const res = await matchHistory(userStore.userId)
+    if (res.status === 'success' && res.data) {
+      recentMatches.value = (res.data.items || []).slice(0, 5)
+    }
+  } catch {
+    recentMatches.value = []
+  }
+}
+
+/** 匹配度配色（对齐 token：$success / $warning / $error） */
+function scoreColor(s?: number): string {
+  if ((s ?? 0) >= 75) return '#10b981' // $success
+  if ((s ?? 0) >= 50) return '#d97706' // $warning
+  return '#ef4444'                      // $error
+}
+
+/** 时间格式化（复用 JdMatcher 同款） */
+function formatTime(t?: string | null): string {
+  if (!t) return ''
+  return t.replace('T', ' ').slice(0, 16)
+}
+
+onMounted(() => {
+  loadProfile()
+  loadMatches()
+})
 </script>
 
 <style scoped lang="scss">
-@import '@/styles/variables.scss';
-
-.home-container {
+.home {
   min-height: 100vh;
   background: $bg-light;
 }
 
-.header {
-  background: $bg-white;
-  box-shadow: $shadow-sm;
-  padding: 0;
-}
-
-.header-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  height: 100%;
-  max-width: $container-xl;
+.main {
+  max-width: 1040px;
   margin: 0 auto;
-  padding: 0 $spacing-xl;
+  padding: $spacing-3xl $spacing-xl;
 }
 
-.logo {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-
-  .logo-text {
-    font-size: $font-size-xl;
-    font-weight: $font-weight-bold;
-    color: $primary-color;
-  }
-}
-
-.user-menu {
-  .user-name {
-    display: flex;
-    align-items: center;
-    gap: $spacing-sm;
-    cursor: pointer;
-    padding: $spacing-sm;
-    border-radius: $radius-md;
-    transition: background $transition-base ease;
-
-    &:hover {
-      background: $bg-light;
-    }
-  }
-
-  .avatar {
-    background: $primary-color;
-    color: $bg-white;
-    font-weight: $font-weight-semibold;
-  }
-}
-
-.main-content {
-  max-width: $container-xl;
-  margin: 0 auto;
-  padding: $spacing-2xl $spacing-xl;
-}
-
-.welcome-section {
-  text-align: center;
+/* 欢迎区 */
+.welcome {
   margin-bottom: $spacing-2xl;
 
-  h1 {
-    font-size: $font-size-3xl;
-    font-weight: $font-weight-bold;
-    color: $text-primary;
+  .eyebrow {
+    font-family: $font-mono;
+    font-size: $font-size-xs;
+    letter-spacing: 0.15em;
+    color: $accent-color;
     margin-bottom: $spacing-sm;
   }
 
-  .subtitle {
-    font-size: $font-size-lg;
+  h1 {
+    font-size: $font-size-3xl;
+    margin-bottom: $spacing-sm;
+  }
+
+  .welcome-sub {
     color: $text-secondary;
   }
 }
 
-.quick-actions {
+/* 状态块（加载 / 错误） */
+.state-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: $spacing-md;
+  padding: $spacing-3xl $spacing-xl;
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  color: $text-secondary;
   margin-bottom: $spacing-2xl;
+}
 
-  .action-card {
-    text-align: center;
-    border-radius: $radius-lg;
-    transition: transform $transition-base ease;
+.state-title {
+  font-family: $font-heading;
+  font-size: $font-size-xl;
+  color: $ink;
+}
+
+.state-sub {
+  font-size: $font-size-sm;
+  color: $text-secondary;
+  max-width: 40ch;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid $border-color;
+  border-top-color: $primary-color;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 新用户引导：大 CTA */
+.onboard {
+  padding: $spacing-3xl $spacing-2xl;
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-left: 3px solid $accent-color;
+  border-radius: $radius-lg;
+  margin-bottom: $spacing-2xl;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: $spacing-md;
+
+  .onboard-eyebrow {
+    font-family: $font-mono;
+    font-size: $font-size-xs;
+    letter-spacing: 0.15em;
+    color: $accent-color;
+  }
+
+  .onboard-title {
+    font-family: $font-heading;
+    font-size: $font-size-2xl;
+    color: $ink;
+    line-height: 1.4;
+    max-width: 36ch;
+  }
+}
+
+.cta {
+  background: $primary-color;
+  color: #fff;
+  border: none;
+  padding: $spacing-md $spacing-2xl;
+  border-radius: $radius-md;
+  cursor: pointer;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  transition: background $transition-base ease;
+
+  &:hover {
+    background: $primary-dark;
+  }
+}
+
+/* 看板：两列 */
+.board {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-lg;
+  margin-bottom: $spacing-3xl;
+}
+
+.card {
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  padding: $spacing-xl;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $spacing-lg;
+
+  .card-eyebrow {
+    font-family: $font-mono;
+    font-size: $font-size-xs;
+    letter-spacing: 0.12em;
+    color: $text-secondary;
+  }
+}
+
+.link {
+  background: none;
+  border: none;
+  color: $primary-color;
+  font-size: $font-size-sm;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover {
+    color: $primary-dark;
+  }
+}
+
+/* 画像计数 */
+.stats {
+  display: flex;
+  gap: $spacing-xl;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.stat-num {
+  font-family: $font-heading;
+  font-size: $font-size-3xl;
+  font-weight: $font-weight-bold;
+  color: $ink;
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: $font-size-xs;
+  color: $text-secondary;
+}
+
+/* 最近匹配列表 */
+.match-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.match-item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-sm 0;
+  border-bottom: 1px solid $border-light;
+  cursor: pointer;
+  font-size: $font-size-sm;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover .m-pos {
+    color: $primary-color;
+  }
+}
+
+.m-score {
+  font-weight: $font-weight-bold;
+  min-width: 36px;
+  font-size: $font-size-base;
+}
+
+.m-pos {
+  flex: 1;
+  color: $text-primary;
+  transition: color $transition-base ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-time {
+  color: $text-disabled;
+  font-size: $font-size-xs;
+}
+
+.match-empty {
+  text-align: center;
+  padding: $spacing-lg 0;
+  color: $text-secondary;
+  font-size: $font-size-sm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $spacing-md;
+}
+
+/* 按钮 */
+.btn-primary {
+  background: $primary-color;
+  color: #fff;
+  border: none;
+  padding: $spacing-sm $spacing-xl;
+  border-radius: $radius-md;
+  cursor: pointer;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  transition: background $transition-base ease;
+
+  &:hover {
+    background: $primary-dark;
+  }
+
+  &.sm {
+    padding: $spacing-xs $spacing-lg;
+  }
+}
+
+/* 下一步链路 */
+.section-label {
+  font-family: $font-mono;
+  font-size: $font-size-xs;
+  letter-spacing: 0.12em;
+  color: $text-secondary;
+  margin-bottom: $spacing-md;
+}
+
+.flow {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.flow-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: $spacing-lg;
+  padding: $spacing-lg $spacing-xl;
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-left: 3px solid transparent;
+  border-radius: $radius-lg;
+  transition: all $transition-base ease;
+
+  &.is-open {
+    cursor: pointer;
 
     &:hover {
-      transform: translateY(-4px);
+      border-left-color: $primary-color;
+      transform: translateX(4px);
+      box-shadow: $shadow-md;
     }
+  }
 
-    .card-content {
-      padding: $spacing-lg 0;
+  &.is-soon {
+    background: $bg-gray;
 
-      h3 {
-        font-size: $font-size-xl;
-        font-weight: $font-weight-semibold;
-        color: $text-primary;
-        margin: $spacing-md 0 $spacing-sm;
-      }
-
-      p {
-        font-size: $font-size-base;
-        color: $text-secondary;
-      }
+    .flow-no {
+      color: $text-disabled;
     }
   }
 }
 
-.progress-card {
-  border-radius: $radius-lg;
+.flow-no {
+  font-family: $font-heading;
+  font-size: $font-size-2xl;
+  font-weight: $font-weight-bold;
+  color: $accent-color;
+  min-width: 44px;
+}
 
-  .card-header {
-    h2 {
-      font-size: $font-size-xl;
-      font-weight: $font-weight-semibold;
-      color: $text-primary;
-    }
+.flow-body {
+  h3 {
+    font-size: $font-size-lg;
+    margin-bottom: $spacing-xs;
   }
 
-  .progress-stats {
-    .stat-item {
-      text-align: center;
-      padding: $spacing-lg 0;
-
-      .stat-value {
-        font-size: $font-size-3xl;
-        font-weight: $font-weight-bold;
-        color: $primary-color;
-        margin-bottom: $spacing-sm;
-      }
-
-      .stat-label {
-        font-size: $font-size-base;
-        color: $text-secondary;
-      }
-    }
+  p {
+    font-size: $font-size-sm;
+    color: $text-secondary;
   }
 }
 
+.flow-cta {
+  .cta-open {
+    color: $primary-color;
+    font-weight: $font-weight-medium;
+    font-size: $font-size-sm;
+    white-space: nowrap;
+  }
+
+  .cta-soon {
+    color: $text-disabled;
+    font-size: $font-size-xs;
+    border: 1px solid $border-color;
+    padding: 2px 10px;
+    border-radius: $radius-full;
+    white-space: nowrap;
+  }
+}
+
+/* 响应式 */
 @media (max-width: $container-md) {
-  .header-content {
-    padding: 0 $spacing-lg;
+  .main {
+    padding: $spacing-2xl $spacing-lg;
   }
 
-  .main-content {
-    padding: $spacing-xl $spacing-lg;
+  .welcome h1 {
+    font-size: $font-size-2xl;
   }
 
-  .welcome-section {
-    h1 {
-      font-size: $font-size-2xl;
-    }
+  .board {
+    grid-template-columns: 1fr;
   }
 
-  .quick-actions {
-    :deep(.el-col) {
-      margin-bottom: $spacing-lg;
-    }
+  .stats {
+    gap: $spacing-lg;
+  }
+
+  .flow-item {
+    padding: $spacing-md;
+    gap: $spacing-md;
   }
 }
 </style>

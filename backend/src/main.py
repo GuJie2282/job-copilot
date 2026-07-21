@@ -119,6 +119,9 @@ app.include_router(jd_router, prefix="/api/jd", tags=["JD 匹配"])
 from src.api.interview import interview_router
 app.include_router(interview_router, prefix="/api/interview", tags=["模拟面试"])
 
+from src.api.knowledge import knowledge_router
+app.include_router(knowledge_router, prefix="/api/knowledge", tags=["面经库"])
+
 if __name__ == "__main__":
     import uvicorn
 

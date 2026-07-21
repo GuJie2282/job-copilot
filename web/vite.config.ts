@@ -14,7 +14,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8001',
         changeOrigin: true
       }
     }
@@ -22,7 +22,14 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
-        additionalData: `@use "@/styles/variables.scss" as *;`
+        // 把 variables.scss 注入到每个 scss 文件前，使任意组件可直接用 $token
+        // 但排除 variables.scss 自身，否则会「自己 @use 自己」造成模块循环
+        additionalData(source: string, filename: string) {
+          if (filename.replace(/\\/g, '/').endsWith('src/styles/variables.scss')) {
+            return source
+          }
+          return `@use "@/styles/variables.scss" as *;\n${source}`
+        }
       }
     }
   }

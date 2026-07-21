@@ -1,123 +1,129 @@
 <template>
-  <div class="register-container">
-    <div class="register-box">
-      <!-- Logo 和标题 -->
-      <div class="register-header">
-        <div class="logo">
-          <el-icon :size="48" color="#2563eb">
-            <UserFilled />
-          </el-icon>
+  <div class="auth">
+    <!-- 左：品牌叙事区（与登录页一致） -->
+    <aside class="auth__brand">
+      <div class="brand-inner">
+        <div class="brand-logo">
+          <span class="brand-mark">求</span>
+          <span class="brand-name">求职 Copilot</span>
         </div>
-        <h1 class="title">求职 Copilot</h1>
-        <p class="subtitle">开始你的求职之旅</p>
+        <h1 class="brand-thesis">把模糊的求职，<br />变成清晰的清单。</h1>
+        <p class="brand-sub">AI 求职教练 · 从画像到 Offer 的全链路陪伴</p>
+        <ol class="brand-flow">
+          <li><span class="num">01</span> 建立画像</li>
+          <li><span class="num">02</span> JD 匹配</li>
+          <li><span class="num">03</span> 简历优化</li>
+          <li><span class="num">04</span> 模拟面试</li>
+        </ol>
       </div>
+    </aside>
 
-      <!-- 注册表单 -->
-      <el-form
-        ref="registerFormRef"
-        :model="registerForm"
-        :rules="registerRules"
-        class="register-form"
-        size="large"
-      >
-        <el-form-item prop="name">
-          <el-input
-            v-model="registerForm.name"
-            placeholder="姓名"
-            prefix-icon="User"
-            :disabled="isLoading"
-          />
-        </el-form-item>
+    <!-- 右：表单区 -->
+    <main class="auth__panel">
+      <div class="panel-inner">
+        <header class="panel-head">
+          <h2>创建账号</h2>
+          <p>注册后，开启你的求职诊断</p>
+        </header>
 
-        <el-form-item prop="email">
-          <el-input
-            v-model="registerForm.email"
-            placeholder="邮箱地址"
-            prefix-icon="Message"
-            :disabled="isLoading"
-          />
-        </el-form-item>
-
-        <el-form-item prop="phone">
-          <el-input
-            v-model="registerForm.phone"
-            placeholder="手机号（可选）"
-            prefix-icon="Phone"
-            :disabled="isLoading"
-          />
-        </el-form-item>
-
-        <el-form-item prop="verificationCode">
-          <div class="verification-code-wrapper">
+        <el-form
+          ref="registerFormRef"
+          :model="registerForm"
+          :rules="registerRules"
+          class="auth-form"
+          size="large"
+          label-position="top"
+        >
+          <el-form-item prop="name" label="姓名">
             <el-input
-              v-model="registerForm.verificationCode"
-              placeholder="验证码"
-              prefix-icon="Key"
+              v-model="registerForm.name"
+              placeholder="2–20 个字符"
               :disabled="isLoading"
             />
-            <el-button
-              type="primary"
-              :disabled="isCodeSending || countdown > 0 || !isEmailValid"
-              :loading="isCodeSending"
-              @click="handleSendCode"
-            >
-              {{ countdown > 0 ? `${countdown}秒后重试` : '获取验证码' }}
-            </el-button>
-          </div>
-        </el-form-item>
+          </el-form-item>
 
-        <el-form-item prop="password">
-          <el-input
-            v-model="registerForm.password"
-            type="password"
-            placeholder="密码（至少6位）"
-            prefix-icon="Lock"
-            show-password
-            :disabled="isLoading"
-          />
-        </el-form-item>
+          <el-form-item prop="email" label="邮箱">
+            <el-input
+              v-model="registerForm.email"
+              placeholder="you@example.com"
+              :disabled="isLoading"
+            />
+          </el-form-item>
 
-        <el-form-item prop="confirmPassword">
-          <el-input
-            v-model="confirmPassword"
-            type="password"
-            placeholder="确认密码"
-            prefix-icon="Lock"
-            show-password
-            :disabled="isLoading"
-            @keyup.enter="handleRegister"
-          />
-        </el-form-item>
+          <el-form-item prop="phone" label="手机号（可选）">
+            <el-input
+              v-model="registerForm.phone"
+              placeholder="选填，便于后续功能通知"
+              :disabled="isLoading"
+            />
+          </el-form-item>
 
-        <!-- 服务条款 -->
-        <el-form-item prop="agreement">
-          <el-checkbox v-model="agreedToTerms" :disabled="isLoading">
-            我已阅读并同意
-            <el-link type="primary">《用户协议》</el-link>
-            和
-            <el-link type="primary">《隐私政策》</el-link>
-          </el-checkbox>
-        </el-form-item>
+          <el-form-item prop="verificationCode" label="邮箱验证码">
+            <div class="code-row">
+              <el-input
+                v-model="registerForm.verificationCode"
+                placeholder="6 位数字"
+                :disabled="isLoading"
+              />
+              <el-button
+                type="primary"
+                plain
+                class="send-btn"
+                :disabled="isCodeSending || countdown > 0 || !isEmailValid"
+                :loading="isCodeSending"
+                @click="handleSendCode"
+              >
+                {{ countdown > 0 ? `${countdown}s 后重试` : '获取验证码' }}
+              </el-button>
+            </div>
+          </el-form-item>
 
-        <el-form-item>
+          <el-form-item prop="password" label="密码">
+            <el-input
+              v-model="registerForm.password"
+              type="password"
+              placeholder="至少 6 位"
+              show-password
+              :disabled="isLoading"
+            />
+          </el-form-item>
+
+          <el-form-item prop="confirmPassword" label="确认密码">
+            <el-input
+              v-model="registerForm.confirmPassword"
+              type="password"
+              placeholder="再输入一次"
+              show-password
+              :disabled="isLoading"
+              @keyup.enter="handleRegister"
+            />
+          </el-form-item>
+
+          <el-form-item prop="agreement" class="agreement">
+            <el-checkbox v-model="agreedToTerms" :disabled="isLoading">
+              我已阅读并同意
+              <el-link type="primary" :underline="false">《用户协议》</el-link>
+              和
+              <el-link type="primary" :underline="false">《隐私政策》</el-link>
+            </el-checkbox>
+          </el-form-item>
+
           <el-button
             type="primary"
-            class="register-button"
+            class="submit"
             :loading="isLoading"
             :disabled="isLoading || !agreedToTerms"
             @click="handleRegister"
           >
-            {{ isLoading ? '注册中...' : '注册' }}
+            {{ isLoading ? '注册中…' : '注册' }}
           </el-button>
-        </el-form-item>
+        </el-form>
 
-        <!-- 登录链接 -->
-        <div class="login-link">
-          已有账号？
-          <el-link type="primary" @click="goToLogin">立即登录</el-link>
-        </div>
-      </el-form>
-    </div>
+        <p class="switch">
+          已有账号？<el-link type="primary" :underline="false" @click="goToLogin">立即登录</el-link>
+        </p>
+      </div>
+    </main>
   </div>
 </template>
 
@@ -125,9 +131,8 @@
 import { reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { UserFilled, User, Lock, Message, Phone, Key } from '@element-plus/icons-vue';
 import { useUserStore } from '@/stores/user';
-import { authApi } from '@/api/auth';
+import { authApi, AuthApiError } from '@/api/auth';
 import type { RegisterData } from '@/types/user';
 
 // 路由
@@ -136,18 +141,13 @@ const router = useRouter();
 // 状态管理
 const userStore = useUserStore();
 
-// 表单引用
+// 表单引用与加载状态
 const registerFormRef = ref<FormInstance>();
-
-// 加载状态
 const isLoading = ref(false);
 const isCodeSending = ref(false);
 
 // 倒计时
 const countdown = ref(0);
-
-// 确认密码
-const confirmPassword = ref('');
 
 // 同意条款
 const agreedToTerms = ref(false);
@@ -158,10 +158,11 @@ const registerForm = reactive<RegisterData>({
   email: '',
   phone: '',
   password: '',
+  confirmPassword: '',
   verificationCode: ''
 });
 
-// 验证邮箱格式是否有效
+// 验证邮箱格式是否有效（用于「获取验证码」按钮的启用判断）
 const isEmailValid = computed(() => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(registerForm.email);
@@ -169,6 +170,10 @@ const isEmailValid = computed(() => {
 
 // 自定义验证：确认密码
 const validateConfirmPassword = (_rule: unknown, value: string, callback: (error?: Error) => void): void => {
+  if (!value) {
+    callback();
+    return;
+  }
   if (value !== registerForm.password) {
     callback(new Error('两次输入的密码不一致'));
   } else {
@@ -231,9 +236,9 @@ const handleSendCode = async (): Promise<void> => {
   try {
     isCodeSending.value = true;
     await authApi.sendVerificationCode(registerForm.email);
-    ElMessage.success('验证码已发送到您的邮箱');
+    ElMessage.success('验证码已发送到你的邮箱');
 
-    // 开始倒计时
+    // 开始 60 秒倒计时
     countdown.value = 60;
     const timer = setInterval(() => {
       countdown.value--;
@@ -242,7 +247,14 @@ const handleSendCode = async (): Promise<void> => {
       }
     }, 1000);
   } catch (error) {
-    console.error('发送验证码失败:', error);
+    if (error instanceof AuthApiError) {
+      ElMessage.error(error.message);
+      if (error.action === 'wait') {
+        ElMessage.warning('发送过于频繁，请稍后再试');
+      }
+    } else {
+      ElMessage.error('发送验证码失败，请稍后重试');
+    }
   } finally {
     isCodeSending.value = false;
   }
@@ -263,11 +275,29 @@ const handleRegister = async (): Promise<void> => {
     await userStore.register(registerForm);
 
     ElMessage.success('注册成功');
-
-    // 跳转到首页
     router.push('/');
   } catch (error) {
-    console.error('注册失败:', error);
+    if (error instanceof AuthApiError) {
+      ElMessage.error(error.message);
+
+      if (error.action === 'login') {
+        // 邮箱已存在，提示登录
+        ElMessage({
+          message: '该邮箱已注册，即将跳转到登录页面',
+          type: 'info',
+          duration: 2000,
+          onClose: () => {
+            router.push('/login');
+          }
+        });
+      } else if (error.action === 'resend_code') {
+        ElMessage.warning('验证码有问题，请重新获取');
+      } else if (error.action === 'fix_password') {
+        ElMessage.warning('请检查密码格式');
+      }
+    } else {
+      ElMessage.error('注册失败，请稍后重试');
+    }
   } finally {
     isLoading.value = false;
   }
@@ -282,104 +312,47 @@ const goToLogin = (): void => {
 </script>
 
 <style scoped lang="scss">
-@import '@/styles/variables.scss';
-
-.register-container {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: $spacing-lg;
-}
-
-.register-box {
-  width: 100%;
-  max-width: 460px;
-  background: $bg-white;
-  border-radius: $radius-xl;
-  box-shadow: $shadow-lg;
-  padding: $spacing-2xl;
-}
-
-.register-header {
-  text-align: center;
-  margin-bottom: $spacing-2xl;
-}
-
-.logo {
-  margin-bottom: $spacing-md;
-}
-
-.title {
-  font-size: $font-size-3xl;
-  font-weight: $font-weight-bold;
-  color: $text-primary;
-  margin-bottom: $spacing-sm;
-}
-
-.subtitle {
-  font-size: $font-size-lg;
-  color: $text-secondary;
-}
-
-.register-form {
-  :deep(.el-form-item) {
-    margin-bottom: $spacing-lg;
-  }
-
-  :deep(.el-input__wrapper) {
-    border-radius: $radius-md;
-    padding: $spacing-sm $spacing-md;
-  }
-}
-
-.verification-code-wrapper {
+.code-row {
   display: flex;
   gap: $spacing-sm;
   width: 100%;
 
-  .el-input {
+  :deep(.el-input) {
     flex: 1;
   }
 
-  .el-button {
+  .send-btn {
     flex-shrink: 0;
   }
 }
 
-.register-button {
-  width: 100%;
-  height: 48px;
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-  border-radius: $radius-md;
+.agreement {
+  :deep(.el-checkbox__label) {
+    font-size: $font-size-sm;
+    color: $text-secondary;
+    line-height: $line-height-normal;
+  }
 }
 
-.login-link {
+.submit {
+  width: 100%;
+  height: 48px;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+}
+
+.switch {
   text-align: center;
   margin-top: $spacing-xl;
-  font-size: $font-size-base;
+  font-size: $font-size-sm;
   color: $text-secondary;
 }
 
-@media (max-width: $container-sm) {
-  .register-container {
-    padding: $spacing-md;
-  }
-
-  .register-box {
-    padding: $spacing-xl;
-  }
-
-  .title {
-    font-size: $font-size-2xl;
-  }
-
-  .verification-code-wrapper {
+@media (max-width: 480px) {
+  .code-row {
     flex-direction: column;
 
-    .el-button {
+    .send-btn {
       width: 100%;
     }
   }

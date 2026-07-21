@@ -1,86 +1,78 @@
 <template>
-  <div class="login-container">
-    <div class="login-box">
-      <!-- Logo 和标题 -->
-      <div class="login-header">
-        <div class="logo">
-          <el-icon :size="48" color="#2563eb">
-            <UserFilled />
-          </el-icon>
+  <div class="auth">
+    <!-- 左：品牌叙事区 -->
+    <aside class="auth__brand">
+      <div class="brand-inner">
+        <div class="brand-logo">
+          <span class="brand-mark">求</span>
+          <span class="brand-name">求职 Copilot</span>
         </div>
-        <h1 class="title">求职 Copilot</h1>
-        <p class="subtitle">你的私人求职教练</p>
+        <h1 class="brand-thesis">把模糊的求职，<br />变成清晰的清单。</h1>
+        <p class="brand-sub">AI 求职教练 · 从画像到 Offer 的全链路陪伴</p>
+        <ol class="brand-flow">
+          <li><span class="num">01</span> 建立画像</li>
+          <li><span class="num">02</span> JD 匹配</li>
+          <li><span class="num">03</span> 简历优化</li>
+          <li><span class="num">04</span> 模拟面试</li>
+        </ol>
       </div>
+    </aside>
 
-      <!-- 登录表单 -->
-      <el-form
-        ref="loginFormRef"
-        :model="loginForm"
-        :rules="loginRules"
-        class="login-form"
-        size="large"
-      >
-        <el-form-item prop="email">
-          <el-input
-            v-model="loginForm.email"
-            placeholder="邮箱地址"
-            prefix-icon="Message"
-            :disabled="isLoading"
-          />
-        </el-form-item>
+    <!-- 右：表单区 -->
+    <main class="auth__panel">
+      <div class="panel-inner">
+        <header class="panel-head">
+          <h2>欢迎回来</h2>
+          <p>登录后继续你的求职进度</p>
+        </header>
 
-        <el-form-item prop="password">
-          <el-input
-            v-model="loginForm.password"
-            type="password"
-            placeholder="密码"
-            prefix-icon="Lock"
-            show-password
-            :disabled="isLoading"
-            @keyup.enter="handleLogin"
-          />
-        </el-form-item>
+        <el-form
+          ref="loginFormRef"
+          :model="loginForm"
+          :rules="loginRules"
+          class="auth-form"
+          size="large"
+          label-position="top"
+        >
+          <el-form-item prop="email" label="邮箱">
+            <el-input
+              v-model="loginForm.email"
+              placeholder="you@example.com"
+              :disabled="isLoading"
+            />
+          </el-form-item>
 
-        <div class="form-options">
-          <el-checkbox v-model="rememberMe" :disabled="isLoading">记住我</el-checkbox>
-          <el-link type="primary">忘记密码？</el-link>
-        </div>
+          <el-form-item prop="password" label="密码">
+            <el-input
+              v-model="loginForm.password"
+              type="password"
+              placeholder="至少 6 位"
+              show-password
+              :disabled="isLoading"
+              @keyup.enter="handleLogin"
+            />
+          </el-form-item>
 
-        <el-form-item>
+          <div class="form-row">
+            <el-checkbox v-model="rememberMe" :disabled="isLoading">记住我</el-checkbox>
+          </div>
+
           <el-button
             type="primary"
-            class="login-button"
+            class="submit"
             :loading="isLoading"
             :disabled="isLoading"
             @click="handleLogin"
           >
-            {{ isLoading ? '登录中...' : '登录' }}
+            {{ isLoading ? '登录中…' : '登录' }}
           </el-button>
-        </el-form-item>
+        </el-form>
 
-        <!-- 第三方登录 -->
-        <div class="divider">
-          <span>或使用第三方登录</span>
-        </div>
-
-        <div class="social-login">
-          <el-button
-            class="social-button wechat"
-            :disabled="isLoading"
-            @click="handleWechatLogin"
-          >
-            <el-icon><ChatDotSquare /></el-icon>
-            <span>微信登录</span>
-          </el-button>
-        </div>
-
-        <!-- 注册链接 -->
-        <div class="register-link">
-          还没有账号？
-          <el-link type="primary" @click="goToRegister">立即注册</el-link>
-        </div>
-      </el-form>
-    </div>
+        <p class="switch">
+          还没有账号？<el-link type="primary" :underline="false" @click="goToRegister">立即注册</el-link>
+        </p>
+      </div>
+    </main>
   </div>
 </template>
 
@@ -88,7 +80,6 @@
 import { reactive, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
-import { UserFilled, Lock, Message, ChatDotSquare } from '@element-plus/icons-vue';
 import { useUserStore } from '@/stores/user';
 import type { LoginCredentials } from '@/types/user';
 
@@ -99,13 +90,9 @@ const route = useRoute();
 // 状态管理
 const userStore = useUserStore();
 
-// 表单引用
+// 表单引用与加载状态
 const loginFormRef = ref<FormInstance>();
-
-// 加载状态
 const isLoading = ref(false);
-
-// 记住我
 const rememberMe = ref(false);
 
 // 登录表单数据
@@ -138,12 +125,13 @@ const handleLogin = async (): Promise<void> => {
 
     isLoading.value = true;
 
-    await userStore.login(loginForm);
+    // 把「记住我」勾选状态一起传给 store → API（决定 Refresh Token 有效期）
+    await userStore.login({ ...loginForm, rememberMe: rememberMe.value });
 
     ElMessage.success('登录成功');
 
     // 跳转到目标页面或首页
-    const redirect = (route.query.redirect as string) || '/';
+    const redirect = (route.query['redirect'] as string) || '/';
     router.push(redirect);
   } catch (error) {
     console.error('登录失败:', error);
@@ -151,13 +139,6 @@ const handleLogin = async (): Promise<void> => {
   } finally {
     isLoading.value = false;
   }
-};
-
-/**
- * 微信登录（暂未实现）
- */
-const handleWechatLogin = (): void => {
-  ElMessage.info('微信登录功能即将上线');
 };
 
 /**
@@ -169,136 +150,24 @@ const goToRegister = (): void => {
 </script>
 
 <style scoped lang="scss">
-@import '@/styles/variables.scss';
-
-.login-container {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: $spacing-lg;
-}
-
-.login-box {
-  width: 100%;
-  max-width: 420px;
-  background: $bg-white;
-  border-radius: $radius-xl;
-  box-shadow: $shadow-lg;
-  padding: $spacing-2xl;
-}
-
-.login-header {
-  text-align: center;
-  margin-bottom: $spacing-2xl;
-}
-
-.logo {
-  margin-bottom: $spacing-md;
-}
-
-.title {
-  font-size: $font-size-3xl;
-  font-weight: $font-weight-bold;
-  color: $text-primary;
-  margin-bottom: $spacing-sm;
-}
-
-.subtitle {
-  font-size: $font-size-lg;
-  color: $text-secondary;
-}
-
-.login-form {
-  :deep(.el-form-item) {
-    margin-bottom: $spacing-lg;
-  }
-
-  :deep(.el-input__wrapper) {
-    border-radius: $radius-md;
-    padding: $spacing-sm $spacing-md;
-  }
-}
-
-.form-options {
+.form-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: $spacing-lg;
 }
 
-.login-button {
+.submit {
   width: 100%;
   height: 48px;
-  font-size: $font-size-lg;
+  font-size: $font-size-base;
   font-weight: $font-weight-semibold;
-  border-radius: $radius-md;
 }
 
-.divider {
-  display: flex;
-  align-items: center;
-  text-align: center;
-  margin: $spacing-xl 0;
-
-  &::before,
-  &::after {
-    content: '';
-    flex: 1;
-    border-bottom: 1px solid $border-color;
-  }
-
-  span {
-    padding: 0 $spacing-md;
-    font-size: $font-size-sm;
-    color: $text-secondary;
-  }
-}
-
-.social-login {
-  display: flex;
-  gap: $spacing-md;
-}
-
-.social-button {
-  flex: 1;
-  height: 44px;
-  border-radius: $radius-md;
-
-  &.wechat {
-    border-color: #07c160;
-    color: #07c160;
-
-    &:hover {
-      background: #f0fdf4;
-      border-color: #07c160;
-    }
-  }
-
-  :deep(.el-icon) {
-    margin-right: $spacing-xs;
-  }
-}
-
-.register-link {
+.switch {
   text-align: center;
   margin-top: $spacing-xl;
-  font-size: $font-size-base;
+  font-size: $font-size-sm;
   color: $text-secondary;
-}
-
-@media (max-width: $container-sm) {
-  .login-container {
-    padding: $spacing-md;
-  }
-
-  .login-box {
-    padding: $spacing-xl;
-  }
-
-  .title {
-    font-size: $font-size-2xl;
-  }
 }
 </style>

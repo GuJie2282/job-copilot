@@ -194,34 +194,39 @@
 ## 阶段 8：前端（Day 13-18，5-6 天，与阶段 7 部分并行）
 
 ### 8.1 API 与类型
-- [ ] 8.1.1 创建 `web/src/api/interview.ts`（sessions / answer / detail / debrief / history 封装）
-- [ ] 8.1.2 在 `web/src/types/` 补充面试相关类型（Session / QuestionPackage / DebriefReport / Episode）
+- [x] 8.1.1 创建 `web/src/api/interview.ts` + `web/src/api/knowledge.ts`（面试 5 端点 + 面经库端点封装）
+- [x] 8.1.2 `web/src/types/interview.ts` + `types/knowledge.ts`（Session/Question/DebriefReport/PersonalEpisode/CompanyQuestion，严格对齐后端 snake_case）
 
 ### 8.2 会话配置
-- [ ] 8.2.1 创建 `InterviewSetup.vue`（题型/档位/模式/人设选择，JD 可选关联）
-- [ ] 8.2.2 档位用语义化展示（简短/正常/深度/全程，不显示分钟）
-- [ ] 8.2.3 画像缺失/经历不足时引导跳转建立画像
-- [ ] 8.2.4 在路由与导航添加"模拟面试"入口
+- [x] 8.2.1 `InterviewSetup.vue`（类型/档位/模式/人设卡片选择，JD 可选关联）
+- [x] 8.2.2 档位语义化展示（简短/正常/深度/全程，副标题题数，不显示分钟）
+- [x] 8.2.3 画像缺失（PROFILE_MISSING）引导跳转建立画像；detail_warning 软警告 toast
+- [x] 8.2.4 路由 + AppTopBar 导航 + Home 步骤卡 + NextStepsCard 路径对齐
 
 ### 8.3 面试对话
-- [ ] 8.3.1 创建 `InterviewRoom.vue`（面试官消息流 + 用户答题输入）
-- [ ] 8.3.2 实现多态响应处理（awaiting_answer 继续 / finished 跳复盘）
-- [ ] 8.3.3 实现 coach 模式侧栏（实时改进提示）
-- [ ] 8.3.4 实现面试官人设展示（头像/姓名/职位/风格）
-- [ ] 8.3.5 实现反问环节 UI（用户提问输入）
-- [ ] 8.3.6 实现续面（进入进行中会话恢复 transcript）
+- [x] 8.3.1 `InterviewRoom.vue` + `MessageBubble.vue`（IM 聊天流 + 底部输入，Ctrl/⌘+Enter 发送）
+- [x] 8.3.2 多态响应处理（interviewing 渲染下一题 / finished 跳复盘）
+- [x] 8.3.3 coach 模式右侧侧栏（实时 weakness 提示，可折叠）
+- [x] 8.3.4 面试官人设展示（头像 + 模式/类型/档位标签；注：具体 tone 后端 detail 不返回，显示模式标签）
+- [x] 8.3.5 反问环节 UI（qid=qa 作为正常面试官气泡渲染，用户输入走同一答题循环）
+- [x] 8.3.6 续面（GET detail 恢复 transcript + pending_question；finished 直接跳复盘）
 
 ### 8.4 复盘报告
-- [ ] 8.4.1 创建 `DebriefReport.vue`（总评 + 五维雷达 + 逐题回顾）
-- [ ] 8.4.2 实现改进范例对比展示（你的回答 vs 改进版）
-- [ ] 8.4.3 实现失分/卡壳分析展示
-- [ ] 8.4.4 实现后续建议清单
-- [ ] 8.4.5 实现成长对比展示（本次 vs 历史）
+- [x] 8.4.1 `DebriefReport.vue`（总评大数字 + 逐题回顾；注：用 avg_score 大数字，非五维雷达——后端 overview 只 avg_score 无五维分数）
+- [x] 8.4.2 改进范例对比（你的回答 vs better_version 并排 + improvement_point）
+- [x] 8.4.3 失分/卡壳分析展示（inappropriate_answers / stuck_points）
+- [x] 8.4.4 后续建议清单（next_steps 可执行）
+- [ ] 8.4.5 成长对比展示（本次 vs 历史）← 留后续：需后端 topic 检索 + 多场历史数据
 
 ### 8.5 面经库与历史
-- [ ] 8.5.1 创建 `ExperienceLibrary.vue`（个人面经列表 + 筛选 + 公司库浏览）
-- [ ] 8.5.2 实现来源标签透明展示（精选/贡献/AI 拟题）
-- [ ] 8.5.3 创建 `InterviewHistory.vue`（历史会话列表 + 回看复盘）
+- [x] 8.5.1 `ExperienceLibrary.vue`（双 Tab：个人库列表+搜索+筛选+删除 / 公司库浏览+facets 筛选+UGC 贡献 modal）
+- [x] 8.5.2 来源标签透明展示（精选/用户贡献/AI拟题，pill 配色 curated>ugc>llm_generated）
+- [x] 8.5.3 `InterviewHistory.vue`（历史会话列表，finished 跳复盘 / 进行中跳续面）
+
+### 8.6 后端面经库 API（plan 阶段 B1，前端 8.5 依赖）
+- [x] 8.6.1 `backend/src/api/knowledge.py`（个人库 list/搜索/weakness/删单条/清空 + 公司库搜索/facets/UGC）
+- [x] 8.6.2 `knowledge_service` 补 list_personal/delete_one_personal/company_facets
+- [x] 8.6.3 main.py 注册 knowledge_router；隐私剔除（contributor_id/embedding_json 不外泄）；test_knowledge_api 6/6 PASS
 
 ---
 

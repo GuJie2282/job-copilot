@@ -1,18 +1,19 @@
 /**
  * Axios 客户端配置
  */
-import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios';
-import type { ApiResponse, ApiError } from '@/types/api';
+import axios, { type AxiosInstance, type AxiosError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios';
+import type { ApiError } from '@/types/api';
 import { ElMessage } from 'element-plus';
 import { authApi } from './auth';
 
 // 创建 axios 实例
 const client: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
+  timeout: 10000
+  // ⚠️ 不要在这里设默认 Content-Type。
+  // axios 会按 data 类型自动设置：object → application/json，FormData → multipart/form-data。
+  // 若设默认 application/json，会阻止 FormData 用 multipart（axios 不会覆盖已有 Content-Type），
+  // 导致文件上传请求被当成 JSON → 后端解析不出 file → 422 错误。
 });
 
 // 正在刷新 Token 的标志（防止并发刷新）
@@ -95,8 +96,8 @@ client.interceptors.response.use(
       try {
         // 调用刷新 Token 接口
         const response = await authApi.refreshToken(refreshToken);
-        const newToken = response.data.token;
-        const newRefreshToken = response.data.refreshToken;
+        const newToken = response.token;
+        const newRefreshToken = response.refresh_token;
 
         // 更新 localStorage
         localStorage.setItem('token', newToken);
@@ -135,4 +136,16 @@ client.interceptors.response.use(
   }
 );
 
-export default client;
+// 响应拦截器返回的是 response.data（即后端响应体 {status, message, data, ...}），
+// 运行时 client.post(...) 拿到的不是 AxiosResponse 对象，而是响应体本身。
+// 用类型断言把这个真实行为反映到类型上，调用方才能正确访问 response.status / response.profile 等字段。
+// （内部代码仍用原始 client 变量，保留 axios 的 call signature 和完整能力，如重试逻辑。）
+type HttpClient = {
+  get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>
+  post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>
+  patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+}
+
+export default client as unknown as HttpClient;

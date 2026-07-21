@@ -121,6 +121,8 @@ def _personal_to_candidate(row: PersonalEpisodeModel) -> Dict[str, Any]:
         "text": row.question or "",
         "vector": row.embedding_json,
         "source": "personal",
+        "position": row.position,
+        "company": row.company,
         "category": row.category,
         "score": row.score,
         "better_version": row.better_version,
@@ -201,6 +203,46 @@ def delete_all_personal(db: Session, user_id: str) -> int:
     db.commit()
     logger.info(f"删除个人面经：user={user_id}, {deleted} 条")
     return deleted
+
+
+def list_personal(
+    db: Session,
+    user_id: str,
+    offset: int = 0,
+    limit: int = 20,
+    position: Optional[str] = None,
+    company: Optional[str] = None,
+    category: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    个人库分页列表（纯浏览，无搜索词；支持岗位/公司/题型筛选）。
+    与 search_personal 互补：有搜索词走语义检索，无词走本函数翻页。
+    """
+    q = db.query(PersonalEpisodeModel).filter(PersonalEpisodeModel.user_id == user_id)
+    if position:
+        q = q.filter(PersonalEpisodeModel.position == position)
+    if company:
+        q = q.filter(PersonalEpisodeModel.company == company)
+    if category:
+        q = q.filter(PersonalEpisodeModel.category == category)
+    rows = q.order_by(PersonalEpisodeModel.created_at.desc()).offset(offset).limit(limit).all()
+    return [_personal_to_candidate(r) for r in rows]
+
+
+def delete_one_personal(db: Session, episode_id: str, user_id: str) -> bool:
+    """
+    删除单条个人面经（数据权利：精细删除）。
+    带 user_id 校验防越权——只能删自己的，传他人 id 返回 False。
+    """
+    row = db.query(PersonalEpisodeModel).filter(
+        PersonalEpisodeModel.id == episode_id,
+        PersonalEpisodeModel.user_id == user_id,
+    ).first()
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
 
 
 # ============================================================================
@@ -289,6 +331,19 @@ def add_ugc_company(
         db, company=company, position=position, category=category,
         question=question, context=context, source="ugc", contributor_id=user_id,
     )
+
+
+def company_facets(db: Session) -> Dict[str, List[str]]:
+    """
+    公司库 facets：返回现有公司/岗位的去重列表，供前端侧边导航。
+    """
+    companies = [r[0] for r in db.query(CompanyQuestionModel.company)
+                 .filter(CompanyQuestionModel.company.isnot(None))
+                 .distinct().all() if r[0]]
+    positions = [r[0] for r in db.query(CompanyQuestionModel.position)
+                 .filter(CompanyQuestionModel.position.isnot(None))
+                 .distinct().all() if r[0]]
+    return {"companies": companies, "positions": positions}
 
 
 # ============================================================================
