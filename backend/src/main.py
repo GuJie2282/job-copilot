@@ -43,6 +43,7 @@ from src.models import user  # 导入模型以注册到 Base.metadata
 from src.models import profile  # 导入画像与匹配结果模型以注册到 Base.metadata
 from src.models import interview  # 导入面试会话模型以注册到 Base.metadata
 from src.models import knowledge  # 导入面经库模型（个人/公司）以注册到 Base.metadata
+from src.models import resume  # 导入简历模型（简历优化产物）以注册到 Base.metadata
 
 # 创建数据库表（如果不存在）
 Base.metadata.create_all(bind=engine)
@@ -114,6 +115,10 @@ app.include_router(resume_router, prefix="/api/resume", tags=["简历解析"])
 # 注册 JD 匹配路由
 from src.api.jd import jd_router
 app.include_router(jd_router, prefix="/api/jd", tags=["JD 匹配"])
+
+# 注册简历优化路由（路径 A：自动生成；与简历解析共用 /api/resume 前缀，路径不冲突）
+from src.api.resume_optimize import resume_optimize_router
+app.include_router(resume_optimize_router, prefix="/api/resume", tags=["简历优化"])
 
 # 注册模拟面试路由
 from src.api.interview import interview_router

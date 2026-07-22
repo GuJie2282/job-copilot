@@ -57,6 +57,36 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/resume-optimizer',
+    name: 'ResumeOptimizer',
+    component: () => import('@/views/ResumeOptimizer.vue'),
+    meta: {
+      title: '简历优化',
+      requiresAuth: true,
+      chrome: true
+    }
+  },
+  {
+    path: '/resume-refine/:resumeId',
+    name: 'ResumeRefine',
+    component: () => import('@/views/ResumeRefine.vue'),
+    meta: {
+      title: '简历精修',
+      requiresAuth: true,
+      chrome: true
+    }
+  },
+  {
+    path: '/resume-history',
+    name: 'ResumeHistory',
+    component: () => import('@/views/ResumeHistory.vue'),
+    meta: {
+      title: '简历历史',
+      requiresAuth: true,
+      chrome: true
+    }
+  },
+  {
     path: '/profile',
     name: 'Profile',
     component: () => import('@/views/Profile.vue'),

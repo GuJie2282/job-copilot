@@ -105,3 +105,61 @@ export async function healthCheck() {
   const response = await client.get('/resume/health')
   return response
 }
+
+// ============================================================================
+// 简历优化 API（路径 A 自动生成 + 路径 B 精修，对应后端 /api/resume/* 优化端点）
+// 与上面的解析 API 共用 /api/resume 前缀，路径不冲突。
+// ============================================================================
+
+/**
+ * 生成简历（路径 A）：基于画像 + Gap 从零生成。
+ * timeout 90 秒：生成 + 6 维评估 + 最多 3 轮迭代 + 导出，串行多 LLM。
+ */
+export async function generateResume(data: {
+  target_position: string
+  jd_result_id?: string
+  gaps?: any[]
+  user_id?: string
+}) {
+  return await client.post('/resume/generate', data, { timeout: 90000 })
+}
+
+/**
+ * 查询简历（按岗位分组、版本倒序）
+ */
+export async function listResumes(userId: string) {
+  return await client.get('/resume/list', { params: { user_id: userId } })
+}
+
+/**
+ * 查看简历详情（含 Markdown、HTML、评估报告）
+ */
+export async function getResumeDetail(resumeId: string) {
+  return await client.get(`/resume/${resumeId}`)
+}
+
+/**
+ * 获取简历 PDF/HTML（Phase 4 导出已接入：返回 html，前端预览 + 浏览器打印 PDF）
+ */
+export async function getResumePdf(resumeId: string) {
+  return await client.get(`/resume/${resumeId}/pdf`)
+}
+
+/**
+ * 精修（路径 B，interrupt 多态）：
+ * - 不传 feedback：加载草稿 + 展示评估
+ * - 传 feedback：按反馈改写 + 重新评估
+ */
+export async function refineResume(
+  resumeId: string,
+  data: { user_id: string; feedback?: string }
+) {
+  return await client.post(`/resume/${resumeId}/refine`, data, { timeout: 90000 })
+}
+
+/**
+ * 定稿（路径 B）：校验 + 导出 HTML + 落库 finalized
+ */
+export async function finalizeResume(resumeId: string, data: { user_id: string }) {
+  return await client.post(`/resume/${resumeId}/finalize`, data, { timeout: 60000 })
+}

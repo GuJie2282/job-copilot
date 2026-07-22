@@ -142,7 +142,7 @@ const skillCount = computed(() => {
 const steps = [
   { id: 1, no: '01', title: '建立画像', desc: '上传简历或粘贴文本，AI 自动提取你的个人画像。', open: true, to: '/resume-parser' },
   { id: 2, no: '02', title: 'JD 匹配', desc: '粘贴目标岗位，AI 解析要求并给出匹配度与差距清单。', open: true, to: '/jd-matcher' },
-  { id: 3, no: '03', title: '简历优化', desc: '基于目标 JD，AI 定向优化简历的表达与亮点。', open: false, to: '' },
+  { id: 3, no: '03', title: '简历优化', desc: '基于目标 JD，AI 定向优化简历的表达与亮点。', open: true, to: '/resume-optimizer' },
   { id: 4, no: '04', title: '模拟面试', desc: 'AI 扮演面试官，真实场景练习并复盘。', open: true, to: '/interview/setup' }
 ]
 

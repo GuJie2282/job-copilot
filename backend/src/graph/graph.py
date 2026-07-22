@@ -47,6 +47,20 @@ from src.graph.nodes.jd_match import (
     route_after_match,
 )
 
+# 导入简历优化节点（区块三：路径 A 自动生成）
+from src.graph.nodes.resume_optimize import (
+    resume_prepare_node,
+    resume_generate_node,
+    resume_evaluate_node,
+    resume_validate_node,
+    resume_export_node,
+    resume_persist_node,
+    route_after_prepare,
+    route_after_generate,
+    route_after_evaluate,
+    route_after_validate,
+)
+
 
 # ============================================================================
 # 创建状态机图
@@ -97,6 +111,14 @@ def create_graph() -> StateGraph:
     builder.add_node("gap_analysis", gap_analysis_node)
     builder.add_node("report_format", report_format_node)
 
+    # 简历优化流程节点（区块三：路径 A 自动生成）
+    builder.add_node("resume_prepare", resume_prepare_node)
+    builder.add_node("resume_generate", resume_generate_node)
+    builder.add_node("resume_evaluate", resume_evaluate_node)
+    builder.add_node("resume_validate", resume_validate_node)
+    builder.add_node("resume_export", resume_export_node)
+    builder.add_node("resume_persist", resume_persist_node)
+
     # ========================================================================
     # 添加边（edges）
     # ========================================================================
@@ -121,6 +143,7 @@ def create_graph() -> StateGraph:
             "file_parser": "file_parser",
             "text_validation": "text_validation",
             "jd_match": "jd_intake",
+            "resume_optimize": "resume_prepare",
             "chat": "chatbot",
         }
     )
@@ -179,6 +202,26 @@ def create_graph() -> StateGraph:
     )
     builder.add_edge("gap_analysis", "report_format")
     builder.add_edge("report_format", END)
+
+    # 简历优化流程（路径 A：条件边串联，评估/校验失败回 generate 重试，达上限带过）
+    builder.add_conditional_edges(
+        "resume_prepare", route_after_prepare,
+        {"generate": "resume_generate", "end": END}
+    )
+    builder.add_conditional_edges(
+        "resume_generate", route_after_generate,
+        {"evaluate": "resume_evaluate", "end": END}
+    )
+    builder.add_conditional_edges(
+        "resume_evaluate", route_after_evaluate,
+        {"validate": "resume_validate", "generate": "resume_generate"}  # generate 为回边（迭代重试）
+    )
+    builder.add_conditional_edges(
+        "resume_validate", route_after_validate,
+        {"export": "resume_export", "generate": "resume_generate"}  # generate 为回边（格式修复）
+    )
+    builder.add_edge("resume_export", "resume_persist")
+    builder.add_edge("resume_persist", END)
 
     # ========================================================================
     # 编译图

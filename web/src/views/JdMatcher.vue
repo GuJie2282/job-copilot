@@ -67,9 +67,12 @@
 
       <!-- Gap 清单 -->
       <section class="card">
-        <h3 class="card-title">
-          差距清单<span class="title-count tnum">（{{ (result.gaps || []).length }} 项，按严重度排序）</span>
-        </h3>
+        <div class="gap-head">
+          <h3 class="card-title">
+            差距清单<span class="title-count tnum">（{{ (result.gaps || []).length }} 项，按严重度排序）</span>
+          </h3>
+          <button class="btn-primary" type="button" @click="goGenerate">据此生成简历</button>
+        </div>
         <GapList :gaps="result.gaps" />
       </section>
 
@@ -216,6 +219,17 @@ async function viewDetail(id: string) {
   } catch {
     ElMessage.error('加载详情失败')
   }
+}
+
+// 跳转到简历优化，带入本次匹配的 result_id + 岗位（供针对性生成）
+function goGenerate() {
+  const r = result.value
+  if (!r?.result_id) {
+    ElMessage.warning('请先完成匹配')
+    return
+  }
+  const position = r.job_profile?.position_title || ''
+  router.push({ path: '/resume-optimizer', query: { jd_result_id: r.result_id, position } })
 }
 
 function formatTime(t?: string | null) {

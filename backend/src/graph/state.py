@@ -265,10 +265,51 @@ class MockInterviewState(TypedDict):
 
 
 # ============================================================================
+# 简历优化相关状态（扩展）
+# ============================================================================
+
+class ResumeOptimizeState(TypedDict):
+    """
+    简历优化专用状态（路径 A 自动生成 + 路径 B 人机协同精修）。
+
+    路径 A 同构 jd_match（流水线：prepare→generate→evaluate→validate→export→persist），
+    路径 B 同构 mock-interview（interrupt + checkpointer 长程会话）。
+    Phase 3 先实现路径 A；路径 B 相关字段（resume_mode / refine / awaiting_resume_feedback）预留。
+    """
+
+    # --- 输入 ---
+    target_position: Optional[str]                      # 目标岗位
+    jd_result_id: Optional[str]                         # 关联的 JD 匹配结果 ID（可空）
+    gaps_snapshot: Optional[List[Dict[str, Any]]]       # Gap 清单快照（生成中保持一致）
+    profile_snapshot: Optional[Dict[str, Any]]          # 画像快照
+
+    # --- 生成与评估 ---
+    resume_md: Optional[str]                            # 当前 Markdown 草稿
+    resume_html: Optional[str]                          # 渲染后 HTML（Phase 4 导出后填）
+    resume_eval: Optional[Dict[str, Any]]               # 6 维评估报告
+    resume_round: Optional[int]                         # 当前迭代轮次（生成次数，含评估/校验重试）
+    resume_max_rounds: Optional[int]                    # 迭代上限（默认 3）
+
+    # --- 导出与持久化 ---
+    resume_theme: Optional[str]                         # 使用的主题
+    resume_id: Optional[str]                            # 持久化的 resume 记录 ID
+    resume_version: Optional[int]                       # 当前版本号
+    resume_status: Optional[str]                        # draft / refining / finalized
+
+    # --- 模式与控制（路径 B 用，Phase 3 预留）---
+    resume_mode: Optional[str]                          # "auto"（路径 A）/ "refine"（路径 B）
+    resume_finalize_signal: Optional[bool]              # 路径 B：用户确认定稿信号（route 据此 → finalize）
+    resume_user_feedback: Optional[str]                 # 路径 B 用户反馈
+    resume_refine_offered: Optional[bool]               # 路径 A 完成后是否提供精修入口
+    awaiting_resume_feedback: Optional[bool]            # 路径 B interrupt 标志
+    resume_status_code: Optional[str]                   # success / profile_missing / gaps_missing / llm_failed / error
+
+
+# ============================================================================
 # 组合状态（完整状态）
 # ============================================================================
 
-class FullAgentState(AgentState, ResumeParseState, JdMatchState, MockInterviewState):
+class FullAgentState(AgentState, ResumeParseState, JdMatchState, MockInterviewState, ResumeOptimizeState):
     """
     完整的 Agent 状态（基础 + 简历解析 + JD 匹配 + 模拟面试）
 
@@ -348,6 +389,26 @@ def create_initial_state(user_id: Optional[str] = None) -> Dict[str, Any]:
         "current_round": None,
         "current_decision": None,
         "qa_done": None,
+        # 简历优化相关
+        "target_position": None,
+        "jd_result_id": None,
+        "gaps_snapshot": None,
+        "profile_snapshot": None,
+        "resume_md": None,
+        "resume_html": None,
+        "resume_eval": None,
+        "resume_round": 0,
+        "resume_max_rounds": 3,
+        "resume_theme": None,
+        "resume_id": None,
+        "resume_version": None,
+        "resume_status": None,
+        "resume_mode": "auto",
+        "resume_finalize_signal": False,
+        "resume_user_feedback": None,
+        "resume_refine_offered": False,
+        "awaiting_resume_feedback": None,
+        "resume_status_code": None,
     }
 
 

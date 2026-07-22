@@ -538,6 +538,203 @@ def get_gap_suggestion_prompt(gaps: list, user_profile_text: str) -> str:
 
 
 # ============================================================================
+# 简历生成 Prompt（画像 + 差距驱动，从零生成定制简历）
+# ============================================================================
+
+def get_resume_generation_prompt(
+    profile_text: str,
+    gaps_text: str,
+    target_position: str,
+    has_gaps: bool,
+) -> str:
+    """
+    获取简历生成 Prompt（画像 + 差距驱动，从零生成定制简历 Markdown）。
+
+    与 JD 解析 / 隐性判断不同：这里输出是**纯 Markdown 简历**（非 JSON），
+    所以不要求 ```json``` 包裹，而是要求直接输出 Markdown 全文。
+
+    Args:
+        profile_text:    画像 JSON 文本（LLM 从中提取信息组织简历）
+        gaps_text:       已拼接的「差距 + 改写策略」文本（has_gaps=False 时为空串）
+        target_position: 目标岗位
+        has_gaps:        是否有 Gap（False → 通用生成模式，不针对特定 Gap 定向强化）
+    Returns:
+        prompt 字符串
+    """
+    gap_section = (
+        f"## 岗位差距与改写策略（针对这些差距定向强化）\n{gaps_text}\n"
+        if has_gaps
+        else "## 模式\n本次为通用生成（未提供岗位差距）。请基于画像生成一份专业、通用的简历，不针对特定 Gap 定向强化。\n"
+    )
+
+    prompt = f"""你是资深简历顾问。基于候选人画像，针对目标岗位，从零生成一份定制简历（Markdown 格式）。
+
+## 目标岗位
+{target_position}
+
+## 候选人画像
+{profile_text}
+
+{gap_section}## 简历格式规范（必须严格遵守，格式校验器会查这些硬规则）
+- 首个一级标题必须是 `# self-intro`，下用 `key: value` 放 name / role / phone / email / location 等
+- 教育写一行：`education: 学校 · 专业 · 学历 · 2026届`（必须含毕业届或毕业年份）
+- 每个模块用 `# 模块名`（如 `# 教育背景` / `# 工作经历` / `项目经历` / `技能`）
+- 经历用 `## 机构 | 角色`，下一行 `date:` **必须用 YYYY.MM 格式**（如 `date: 2025.06 — 至今` 或 `date: 2023.05 — 2025.06`），**严禁用「2025年06月」中文格式**
+- 经历要点用**扁平**的 `- 要点`（每条独立一行，STAR + 量化，1-2 行），**不要嵌套子 bullet**（不要「- 主项」下再缩进「- 子项」；多条要点都平级用 `- `）
+- 技能用 `- 类别: 值`（按领域分类，如 `- 编程语言: Python · Java`）
+- 标题层级**只用** `#` 和 `##`，不要用 `###` 及更深
+
+## 表述规则（务必遵守）
+1. **只用画像里的信息**，绝不编造候选人没有的经历、项目或量化数字。
+2. **缺素材的模块**：在该处写「（待补充：具体缺什么）」占位，**不要虚构**，宁缺毋滥。
+3. 每条经历遵循 **STAR**（情境/任务/行动/结果）+ **强动词开头**（主导/设计/优化/推动/落地…）。
+4. 涉及公司内部项目名一律**脱敏**：用业务功能或规模描述替代（如"核心交易链路""支撑日均百万订单的系统"），不用"某"式占位。
+5. 表述**平实具体**：不解释领域常识，不用"吃苦耐劳""团队精神"式空话，每条 bullet 1-2 行。
+6. **经历要点必须扁平（重点）**：每条 `- 要点` 独立一行、平级，**严禁嵌套**。正确写法：
+   `- 主导 XX 系统 redesign，日活提升 30%`（一条一行，把细节揉进这一条）。
+   **错误（禁止）**：`- 主项` 下再缩进 `- 子项`。需要展开细节时，合并进同一条 bullet（如「主导 XX，含需求分析、设计与推进，日活提升 30%」）。
+
+## 输出
+**直接输出 Markdown 简历全文**，不要用代码块包裹，不要任何解释或前后缀文字。
+"""
+    return prompt
+
+
+# ============================================================================
+# 简历精修 Prompt（路径 B：按用户反馈改写草稿）
+# ============================================================================
+
+def get_resume_refine_prompt(
+    current_md: str,
+    feedback: str,
+    profile_text: str,
+    gaps_text: str,
+    target_position: str,
+    has_gaps: bool,
+) -> str:
+    """
+    获取简历精修 Prompt（路径 B：基于现有草稿 + 用户反馈做针对性改写）。
+
+    与生成的区别：已有草稿作底，只改反馈涉及的部分（+连带必要调整），不重写整篇。
+
+    Args:
+        current_md:      当前简历草稿（Markdown）
+        feedback:        用户反馈（要改什么）
+        profile_text:    画像 JSON 文本
+        gaps_text:       Gap 清单文本（参考）
+        target_position: 目标岗位
+        has_gaps:        是否有 Gap
+    Returns:
+        prompt 字符串
+    """
+    gap_section = (f"## 岗位差距（参考）\n{gaps_text}\n" if has_gaps else "")
+    prompt = f"""你是资深简历顾问。基于现有简历草稿，按用户反馈做针对性精修。
+
+## 目标岗位
+{target_position}
+
+## 用户反馈（要改什么）
+{feedback}
+
+## 候选人画像
+{profile_text}
+{gap_section}
+## 当前简历草稿
+{current_md}
+
+## 精修规则
+1. **按反馈针对性修改**：「展开某段」→ 补 STAR 细节与量化；「换强调」→ 调整经历顺序或表述重心；「补素材」→ 融入用户在反馈里给出的具体细节。
+2. **保留整体结构**：只改反馈涉及的部分（+连带必要的调整），不要重写整篇。
+3. **格式规范不变**：`# self-intro` 首模块、`## 机构 | 角色`、`date:`、标题只用 `#`/`##`。
+4. **表述规则不变**：STAR + 强动词、脱敏、不编造（画像里没有的不要写，缺素材标「待补充」）。
+
+## 输出
+**直接输出修改后的完整 Markdown 简历**，不要代码块包裹，不要解释。
+"""
+    return prompt
+
+
+# ============================================================================
+# 简历 6 维评估 Prompt（LLM 内容评估——对应 design 决策 3）
+# ============================================================================
+
+def get_resume_evaluation_prompt(
+    resume_md: str,
+    target_position: str,
+    gaps_text: str,
+    profile_text: str,
+) -> str:
+    """
+    获取简历 6 维评估 Prompt。
+
+    输出结构化 JSON 评估报告（维度得分/总分/通过判定/改进优先级）。
+    **只评估、给建议，不直接改写简历**（改写由生成节点根据反馈做）。
+
+    Args:
+        resume_md:       简历 Markdown 全文
+        target_position: 目标岗位
+        gaps_text:       差距清单 JSON 文本（评估 JD 匹配维度时参考）
+        profile_text:    画像 JSON 文本（核对量化数字是否可追溯）
+    Returns:
+        prompt 字符串
+    """
+    prompt = f"""你是严谨的简历质量评估者。对一份生成的简历，从 6 个维度逐项检查，输出结构化评估报告。
+**只评估、给建议，不直接改写简历。**
+
+## 目标岗位
+{target_position}
+
+## 候选人画像（用于核对量化数字是否可追溯至画像）
+{profile_text}
+
+## 岗位差距（评估"JD 匹配"维度时参考，看简历是否针对这些差距做了改写）
+{gaps_text}
+
+## 简历全文
+{resume_md}
+
+## 六个评估维度（加权算 overall_score 0-100）
+1. **basic_norm 基础规范**（weight 0.15）：联系方式齐全 / name 必填 / self-intro 完整 / 时间线无断层 / 排版 / 脱敏合规（无公司内部项目原名，无"某"式占位）
+2. **jd_match JD 匹配**（weight 0.25）：关键词命中 / 能力对齐(技能重叠≥60%) / 相关经历前置 / 隐性需求体现
+3. **quantification 成果量化**（weight 0.25）：STAR 完整 / 至少 1 个可验证数字 / 强动词开头 / 无职责罗列；**量化数字须可追溯至画像，无法追溯或明显编造 → 该维度 fail**
+4. **structure 结构清晰**（weight 0.10）：模块顺序合理 / 层级(# ##)正确 / 无冗余重复 / 每段 3-5 条 bullet
+5. **differentiation 差异化**（weight 0.15）：独特亮点 / 加分项(作品/开源/专利) / 层级适配(初级重执行·高级重决策)
+6. **language 语言表达**（weight 0.10）：简洁无套话 / 客观基于事实 / 具体不抽象 / 主语明确(我非我们)
+
+## 输出格式（**必须包裹在 ```json 代码块中**）
+```json
+{{
+  "overall_score": 82,
+  "passed": false,
+  "dimensions": {{
+    "basic_norm": {{"score": 90, "weight": 0.15, "passed": true, "items": [{{"check": "联系方式齐全", "result": "pass", "note": null}}]}},
+    "jd_match": {{"score": 75, "weight": 0.25, "passed": false, "items": [{{"check": "关键词命中", "result": "partial", "note": "缺 Kafka，建议补充相关项目"}}]}},
+    "quantification": {{"score": 70, "weight": 0.25, "passed": false, "items": [{{"check": "量化指标", "result": "partial", "note": "部分 bullet 缺数字"}}]}},
+    "structure": {{"score": 85, "weight": 0.10, "passed": true, "items": [{{"check": "模块顺序", "result": "pass", "note": null}}]}},
+    "differentiation": {{"score": 80, "weight": 0.15, "passed": true, "items": [{{"check": "独特亮点", "result": "pass", "note": null}}]}},
+    "language": {{"score": 88, "weight": 0.10, "passed": true, "items": [{{"check": "简洁无套话", "result": "pass", "note": null}}]}}
+  }},
+  "feedback_priorities": [
+    {{"priority": "high", "suggestion": "为第二段经历补充可验证的量化指标"}},
+    {{"priority": "medium", "suggestion": "将 XX 项目前置以突出岗位相关"}}
+  ]
+}}
+```
+
+## 规则
+1. **result**：每项 pass / fail / partial；note 仅在不通过时给具体建议，通过则 null。
+2. **维度 passed**：该维度所有检查项无 fail 才 true。
+3. **整体 passed**：六个维度都 passed 才 true。
+4. **overall_score 必须等于 Σ(维度 score × weight)**：先逐维度真实打分，再加权求和。**严禁把维度全填 0**（那是偷懒）——每个维度都要根据其检查项给出真实的 0-100 分（通常 50-95 区间）；**也严禁维度全 0 却 overall 非零**。
+5. **feedback_priorities**：针对 fail 项，按 high / medium / low 给**可执行**建议（如"补量化""前置相关经历"），不要空话。
+6. 客观严谨，不奉承；量化数字无法追溯 → quantification 判 fail。
+
+请输出 JSON：
+"""
+    return prompt
+
+
+# ============================================================================
 # 模拟面试出题 Prompt（生成 QuestionPackage 考查包）
 # ============================================================================
 
