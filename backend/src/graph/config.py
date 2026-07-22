@@ -58,7 +58,8 @@ def get_llm(
     temperature: float = DEFAULT_TEMPERATURE,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     api_key: Optional[str] = None,
-    base_url: Optional[str] = None
+    base_url: Optional[str] = None,
+    timeout: float = 60.0
 ) -> BaseChatModel:
     """
     获取 LLM 实例
@@ -105,7 +106,7 @@ def get_llm(
         max_tokens=max_tokens,
         api_key=api_key,
         base_url=base_url,
-        timeout=120.0,  # LLM 调用超时：长简历 + 详情字段提取，glm-4-flash 生成大 JSON 较慢，30s 经常不够会误判失败
+        timeout=timeout,  # LLM 调用超时（默认 60s；答题循环内的评估/追问传更短快速降级，出题/复盘/简历传更长）
     )
 
     return llm

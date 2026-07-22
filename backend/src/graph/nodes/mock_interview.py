@@ -288,9 +288,9 @@ def _llm_followup(persona: Optional[Dict[str, Any]], probing_point: str, questio
     失败返回 None，上层降级为模板追问。
     """
     try:
-        llm = get_llm(temperature=0.7)
+        llm = get_llm(temperature=0.7, timeout=20)  # 追问：20s 超时，失败直接走模板追问降级
         prompt = get_followup_prompt(persona, probing_point, question, answer)
-        resp = invoke_llm_with_retry(llm, prompt)
+        resp = invoke_llm_with_retry(llm, prompt, max_retries=0)  # 不重试（失败有模板兜底，不拖面试）
         text = (resp.content or "").strip().strip('「」“”"\'').split("\n")[0].strip()
         return text if text else None
     except Exception as e:
@@ -316,9 +316,9 @@ def _clean_eval_text(value) -> Optional[str]:
 def _llm_evaluate(question: str, ideal_signals: list, probing_points: list, answer: str) -> Dict[str, Any]:
     """调 LLM 做信号差检测。任何失败 → 降级（保守认为充分，不追问）。"""
     try:
-        llm = get_llm(temperature=0)  # 评估要确定性
+        llm = get_llm(temperature=0, timeout=30)  # 评估：30s 短超时快速降级（答题循环内，不拖整轮）
         prompt = get_evaluation_prompt(question, ideal_signals, probing_points, answer)
-        resp = invoke_llm_with_retry(llm, prompt)
+        resp = invoke_llm_with_retry(llm, prompt, max_retries=1)  # 最多重试 1 次，减少累积延迟
         data = _extract_json(resp.content)
         if not isinstance(data, dict):
             raise ValueError("评估 LLM 未返回 JSON 对象")
@@ -426,7 +426,7 @@ def _llm_debrief(profile: Dict[str, Any], transcript: list) -> Dict[str, Any]:
     """LLM 生成详细复盘。失败返回空 dict（保留基础复盘）。"""
     import json
     try:
-        llm = get_llm(temperature=0.3)  # 复盘要稳定、贴近回答
+        llm = get_llm(temperature=0.3, timeout=90)  # 复盘大 JSON，90s（一次性，不在答题循环）
         name = profile.get("name") or "候选人"
         targets = profile.get("target_positions") or []
         target = "、".join(targets) if targets else "通用岗位"
