@@ -281,7 +281,7 @@ def _llm_generate_packages(
     weakness_hints: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """调 LLM 生成考查包。任何失败抛异常，由上层降级。"""
-    llm = get_llm(temperature=0.7, timeout=90)  # 出题大 JSON，90s（一次性，不在答题循环）
+    llm = get_llm(temperature=0.7, timeout=90, tier="strong")  # 出题：主力档（质量敏感），大 JSON 90s
     prompt = get_question_generation_prompt(
         candidate_summary=context["candidate_summary"],
         focus_areas=context["focus_areas"],

@@ -238,7 +238,7 @@ def profile_extraction_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         # 获取 LLM 实例
-        llm = get_structured_llm(schema=UserProfile, temperature=0.0)
+        llm = get_structured_llm(schema=UserProfile, temperature=0.0, tier="strong")  # 简历解析：主力档
 
         # 获取合适的 Prompt
         prompt = get_extraction_prompt(
@@ -390,7 +390,7 @@ def chatbot_node(state: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     # 获取 LLM 实例
-    llm = get_llm(temperature=0.7)
+    llm = get_llm(temperature=0.7, tier="fast")  # 对话节点：快档（延迟敏感）
 
     # 获取 Prompt 模板
     prompt_template = create_chat_prompt_template()

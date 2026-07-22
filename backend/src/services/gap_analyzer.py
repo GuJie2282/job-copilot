@@ -57,7 +57,7 @@ def _generate_suggestions(gaps: List[Dict], user_profile: Dict, max_retries: int
     """
     # get_llm 失败（如未配置 API Key）→ 直接降级
     try:
-        llm = get_llm(temperature=0.7)  # 建议适度创造性
+        llm = get_llm(temperature=0.7, tier="strong")  # Gap 建议：主力档（质量敏感）+ 适度创造性
     except Exception as e:
         logger.warning(f"get_llm 失败，Gap 建议降级模板：{e}")
         return [_template_suggestion(g["type"]) for g in gaps]

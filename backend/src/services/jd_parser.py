@@ -86,7 +86,7 @@ def parse_jd(jd_text: str, max_retries: int = 2) -> dict:
     if not jd_text or not jd_text.strip():
         raise ValueError("JD 文本为空，无法解析")
 
-    llm = get_llm(temperature=0.0)
+    llm = get_llm(temperature=0.0, tier="strong")  # JD 解析：主力档（质量敏感）
     last_error = None
 
     for attempt in range(max_retries + 1):

@@ -134,7 +134,7 @@ def _extract_profile_with_retry(text: str, quality_score: float, max_retries: in
     from src.graph.prompts import get_json_extraction_prompt
 
     logger = logging.getLogger(__name__)
-    llm = get_llm(temperature=0.0)
+    llm = get_llm(temperature=0.0, tier="strong")  # 简历解析：主力档（质量敏感）
     last_error = None
 
     for attempt in range(max_retries + 1):
@@ -419,7 +419,7 @@ async def extract_profile(request: ExtractRequest):
         is_retry = request.is_retry
 
         # LLM 提取
-        llm = get_structured_llm(schema=UserProfile, temperature=0.0)
+        llm = get_structured_llm(schema=UserProfile, temperature=0.0, tier="strong")  # 简历解析：主力档
         prompt = get_extraction_prompt(text, quality_score, is_retry)
         profile_obj = invoke_llm_with_retry(llm, prompt)
         profile = profile_obj.model_dump()

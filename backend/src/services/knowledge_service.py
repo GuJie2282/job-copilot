@@ -427,7 +427,7 @@ def llm_augment_company(
     from src.services.jd_parser import _extract_json
 
     try:
-        llm = get_llm(temperature=0.7)
+        llm = get_llm(temperature=0.7, tier="strong")  # 公司库拟题：主力档（质量敏感）
         prompt = get_company_question_augment_prompt(position, count, company)
         resp = invoke_llm_with_retry(llm, prompt)
         data = _extract_json(resp.content)

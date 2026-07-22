@@ -291,7 +291,7 @@ def judge_implicit(implicit_prefs: List[Dict], user_profile: Dict, max_retries: 
         {k: v for k, v in user_profile.items() if v}, ensure_ascii=False
     )[:1500]
 
-    llm = get_llm(temperature=0.0)
+    llm = get_llm(temperature=0.0, tier="strong")  # JD 匹配：主力档（质量敏感）
     last_error = None
     for attempt in range(max_retries + 1):
         try:

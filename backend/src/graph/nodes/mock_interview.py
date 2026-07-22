@@ -315,7 +315,7 @@ def _llm_evaluate(
     任何失败 → 降级（保守认为充分，不追问）。
     """
     try:
-        llm = get_llm(temperature=0, timeout=20)  # 评估：20s 短超时快速降级（答题循环内，不拖整轮）
+        llm = get_llm(temperature=0, timeout=20, tier="fast")  # 评估：快档（延迟敏感）+ 20s 短超时快速降级
         prompt = get_evaluation_prompt(question, ideal_signals, probing_points, answer, persona)
         resp = invoke_llm_with_retry(llm, prompt, max_retries=1)  # 最多重试 1 次，减少累积延迟
         data = _extract_json(resp.content)
@@ -427,7 +427,7 @@ def _llm_debrief(profile: Dict[str, Any], transcript: list) -> Dict[str, Any]:
     """LLM 生成详细复盘。失败返回空 dict（保留基础复盘）。"""
     import json
     try:
-        llm = get_llm(temperature=0.3, timeout=90)  # 复盘大 JSON，90s（一次性，不在答题循环）
+        llm = get_llm(temperature=0.3, timeout=90, tier="strong")  # 复盘：主力档（质量敏感），大 JSON 90s
         name = profile.get("name") or "候选人"
         targets = profile.get("target_positions") or []
         target = "、".join(targets) if targets else "通用岗位"

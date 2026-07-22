@@ -46,6 +46,13 @@ MODEL_CONFIGS = {
         "default_temperature": 0.0,
         "default_max_tokens": 4096,
     },
+    "glm-4.5": {
+        # 主力档：质量敏感任务（出题/复盘/简历解析/JD 解析）。与 flash 共用智谱 base_url + key
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "api_key_env": "LLM_API_KEY",
+        "default_temperature": 0.0,
+        "default_max_tokens": 4096,
+    },
 }
 
 
@@ -59,29 +66,40 @@ def get_llm(
     max_tokens: int = DEFAULT_MAX_TOKENS,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
-    timeout: float = 60.0
+    timeout: float = 60.0,
+    tier: str = "fast",
 ) -> BaseChatModel:
     """
     获取 LLM 实例
 
     Args:
-        model: 模型名称（如 "deepseek-chat"、"gpt-4o-mini"）
+        model: 模型名称（如 "glm-4.5"、"glm-4-flash"）。显式指定时优先级最高，tier 被忽略
         temperature: 温度参数（0.0-1.0，简历解析建议用 0.0）
         max_tokens: 最大生成 tokens
         api_key: API Key（可选，默认从环境变量读取）
         base_url: API Base URL（可选，默认从配置读取）
+        timeout: LLM 调用超时（秒）
+        tier: 模型档位（仅在 model 未指定时生效）——分层选模，平衡质量与成本/延迟：
+              "fast"   快档（默认，LLM_MODEL=glm-4-flash，免费）：延迟敏感场景（评估、对话）
+              "strong" 主力档（LLM_MODEL_STRONG=glm-4.5）：质量敏感场景（出题、复盘、简历/JD 解析）
 
     Returns:
         llm: LLM 实例
 
     示例：
-        >>> llm = get_llm()  # 使用默认配置
-        >>> llm = get_llm(model="gpt-4o-mini")  # 使用 OpenAI
-        >>> llm = get_llm(temperature=0.7)  # 提高温度，增加创造性
+        >>> llm = get_llm()                       # 快档（默认）
+        >>> llm = get_llm(tier="strong")          # 主力档（质量敏感任务）
+        >>> llm = get_llm(model="gpt-4o-mini")    # 显式指定模型（tier 被忽略）
+        >>> llm = get_llm(temperature=0.7)        # 提高温度，增加创造性
     """
-    # 使用默认模型
+    # 模型选择优先级：显式 model > tier 对应环境变量 > 默认
     if model is None:
-        model = os.getenv("LLM_MODEL", DEFAULT_MODEL)
+        if tier == "strong":
+            # 主力档：质量敏感任务（出题/复盘/简历解析等）
+            model = os.getenv("LLM_MODEL_STRONG", "glm-4.5")
+        else:
+            # 快档（默认）：延迟敏感任务（评估/对话）
+            model = os.getenv("LLM_MODEL", DEFAULT_MODEL)
 
     # 获取模型配置
     model_config = MODEL_CONFIGS.get(model, MODEL_CONFIGS[DEFAULT_MODEL])
@@ -115,6 +133,7 @@ def get_llm(
 def get_structured_llm(
     model: Optional[str] = None,
     schema: Optional[BaseModel] = None,
+    tier: str = "fast",
     **kwargs
 ) -> BaseChatModel:
     """
@@ -123,6 +142,7 @@ def get_structured_llm(
     Args:
         model: 模型名称
         schema: Pydantic BaseModel（用于结构化输出）
+        tier: 模型档位（同 get_llm，"fast"快档 / "strong"主力档）
         **kwargs: 其他参数（temperature、max_tokens 等）
 
     Returns:
@@ -132,11 +152,11 @@ def get_structured_llm(
         >>> class UserProfile(BaseModel):
         ...     name: str
         ...     email: str
-        >>> llm = get_structured_llm(schema=UserProfile)
+        >>> llm = get_structured_llm(schema=UserProfile, tier="strong")  # 简历解析用主力档
         >>> result = llm.invoke("简历文本")
         >>> print(result.name)
     """
-    llm = get_llm(model, **kwargs)
+    llm = get_llm(model, tier=tier, **kwargs)
 
     # 如果提供了 schema，使用 with_structured_output
     if schema is not None:
