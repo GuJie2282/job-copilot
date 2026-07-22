@@ -49,7 +49,7 @@ export type RoundAction = 'probe' | 'next' | 'enter_qa' | 'end'
 
 /**
  * 面试官人设（前端组装 4 字段传入 CreateSessionRequest.persona）。
- * 后端 prompts.get_followup_prompt 消费全部 4 字段。
+ * 后端 prompts.get_evaluation_prompt 消费全部 4 字段（追问措辞已合并进评估）。
  */
 export interface Persona {
   tone: string                         // 风格：专业/严肃/轻松/风趣/温和/压力

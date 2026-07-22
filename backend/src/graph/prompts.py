@@ -641,14 +641,29 @@ def get_evaluation_prompt(
     ideal_signals: list,
     probing_points: list,
     answer: str,
+    persona: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
-    获取面试回答评估 Prompt（信号差检测）。
+    获取面试回答评估 Prompt（信号差检测 + 追问措辞）。
 
     拿候选人回答比对 ideal_signals，输出命中/缺失信号 + 缺失→可挖掘点映射，
     让追问「按图索骥、可控可解释」，而非 LLM 临场自由发挥。
+
+    【LLM 时序优化】追问措辞（next_probe_followup）并入本次评估一起产出——
+    原「评估 LLM + 追问 LLM」两次串行合并为一次。追问方向仍由「缺失信号→可挖掘点」
+    决定（按图索骥不变），只是措辞按面试官人设口吻一并生成，省一次 LLM 往返。
+    若回答充分（无缺失信号）则 next_probe_followup 填 null。
     """
     import json
+    # ── 人设解析（追问措辞的口吻依据；与原 get_followup_prompt 复用同一套字段）──
+    persona = persona or {}
+    tone = persona.get("tone", "专业")
+    role = persona.get("role") or {}
+    role_str = f"{role.get('company', '')}{role.get('position', '')}".strip() or "面试官"
+    stress = persona.get("stress_mode")
+    style = persona.get("style_prompt", "")
+    stress_hint = "压力面模式：可适度质疑、追问到底，考察候选人抗压。" if stress else ""
+
     sig_text = json.dumps(ideal_signals, ensure_ascii=False)
     probe_text = json.dumps(probing_points, ensure_ascii=False)
     prompt = f"""你是一位严谨的面试评估官。评估候选人对面试问题的回答质量。
@@ -673,7 +688,8 @@ def get_evaluation_prompt(
   "miss_probe_map": {{ "缺失信号": "对应的可挖掘点（追问方向）" }},
   "score": 75,
   "highlight": "回答亮点（无则 null）",
-  "weakness": "回答失分点（无则 null）"
+  "weakness": "回答失分点（无则 null）",
+  "next_probe_followup": "若 miss_signals 非空：按面试官人设口吻的一句自然追问；无缺失信号则 null"
 }}
 ```
 
@@ -682,7 +698,11 @@ def get_evaluation_prompt(
 2. miss_signals：理想信号中回答未体现的（回答充分则空数组）。
 3. miss_probe_map：为每个缺失信号映射一个可挖掘点（追问方向）；不足以对应则值填 null。
 4. highlight/weakness：具体简短、引用回答内容；没有则 null。
-5. 客观严谨，不奉承。
+5. **next_probe_followup（追问措辞，本次一并生成省一次 LLM 往返）**：
+   - 若 miss_signals 非空：你就是面试官（{role_str}，风格{tone}），从缺失信号对应的可挖掘点里挑一个最值得深挖的方向，用你的风格写**一句**自然追问。{style}{stress_hint}
+     像真人面试官的口吻，不要机械模板，不要每次都用"关于你刚才的回答"开头；不带引号、不带前缀标签，只写追问这一句本身。
+   - 若 miss_signals 为空（回答充分）：填 null。
+6. 客观严谨，不奉承。
 
 请输出 JSON：
 """
@@ -743,46 +763,6 @@ def get_debrief_prompt(profile_summary: str, transcript_json: str, target_positi
 5. 客观、建设性，不奉承。
 
 请输出 JSON：
-"""
-    return prompt
-
-
-# ============================================================================
-# 模拟面试 追问生成 Prompt（带面试官人设口吻——对应 design.md 决策 10）
-# ============================================================================
-
-def get_followup_prompt(
-    persona: Optional[Dict[str, Any]],
-    probing_point: str,
-    question: str,
-    answer: str,
-) -> str:
-    """
-    获取追问生成 Prompt。
-
-    把追问从「固定模板」升级为「LLM 基于人设生成」——让追问自然、有风格口吻
-    （严肃/轻松/风趣/压力），替代机械的"关于你刚才的回答，我想再深入一下——…"。
-
-    追问方向（probing_point）仍由出题时预埋 + evaluator 信号差检测决定（按图索骥），
-    只是【措辞】交给人设化的 LLM。
-    """
-    persona = persona or {}
-    tone = persona.get("tone", "专业")
-    role = persona.get("role") or {}
-    role_str = f"{role.get('company', '')}{role.get('position', '')}".strip() or "面试官"
-    stress = persona.get("stress_mode")
-    style = persona.get("style_prompt", "")
-    stress_hint = "\n（压力面模式：可适度质疑、追问到底，考察候选人抗压能力。）" if stress else ""
-
-    prompt = f"""你是面试官（{role_str}），风格{tone}。{style}{stress_hint}
-
-刚才你问了候选人：「{question}」
-候选人回答：「{answer}」
-
-你想就「{probing_point}」这个方向继续深挖。请用你的风格，生成一句自然的追问——
-像真人面试官的口吻，不要机械模板，不要每次都用"关于你刚才的回答"开头。
-
-只输出追问这一句话本身，不要引号、不要解释、不要前缀标签。
 """
     return prompt
 

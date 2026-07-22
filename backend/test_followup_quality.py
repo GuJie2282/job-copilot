@@ -63,7 +63,7 @@ def run():
 
     for label, ans in ANSWERS.items():
         t0 = time.time()
-        ev = _llm_evaluate(QUESTION, IDEAL_SIGNALS, PROBING_POINTS, ans)
+        ev = _llm_evaluate(QUESTION, IDEAL_SIGNALS, PROBING_POINTS, ans, persona={})
         dt = time.time() - t0
         timings.append(dt)
 
@@ -94,8 +94,10 @@ def run():
         ("空洞回答（额度0）应触发追问", results["空洞（几乎无信号）"][1] == "probe"),
         ("追问上限：额度满时不追问（换题/结束）", all(results[l][2] != "probe" for l in ANSWERS)),
         ("追问基于地图：空洞回答的 miss_probe_map 非空", bool(empty_ev["miss_probe_map"])),
-        ("单轮评估耗时 < 15s", max(timings) < 15),
-        ("平均评估耗时 < 10s", (sum(timings) / len(timings)) < 10),
+        ("追问措辞合并产出：空洞回答的 next_probe_followup 非空", bool(empty_ev.get("next_probe_followup"))),
+        ("单轮评估耗时 < 15s（演示就绪硬上限）", max(timings) < 15),
+        ("平均评估耗时 < 12s（合并后单次产出含追问措辞，基线略升；追问场景总 LLM 已 2→1）",
+         (sum(timings) / len(timings)) < 12),
     ]
     for name, ok in checks:
         print(f"[{'✓ PASS' if ok else '✗ FAIL'}] {name}")

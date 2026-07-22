@@ -195,7 +195,7 @@ async function onStart() {
   profileMissing.value = false
   startProgress()
   try {
-    // 组装人设（4 字段，后端 prompts.get_followup_prompt 全消费）
+    // 组装人设（4 字段，后端 prompts.get_evaluation_prompt 消费——追问措辞已合并进评估）
     const persona: Persona = {
       tone: selectedTone.value,
       role: {

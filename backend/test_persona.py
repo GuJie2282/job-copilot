@@ -1,11 +1,12 @@
 """
-面试官人设验证（add-mock-interview 阶段 6.5.6）
-================================================
+面试官人设验证（add-mock-interview 阶段 6.5.6 / LLM 时序优化后改造）
+================================================================
 
-对【同一追问场景】用 3 种人设（专业/风趣/压力）生成追问，
-验证人设注入生效——追问口吻明显不同，且不再是固定模板"关于你刚才的回答…"。
+对【同一追问场景】用 3 种人设（专业/风趣/压力），经评估入口 _llm_evaluate 产出
+追问措辞（next_probe_followup），验证人设注入生效——口吻明显不同，且不再是固定模板。
 
-同时也顺带验证：追问方向（probing_point）一致，只是措辞随人设变化（按图索骥 + 风格化）。
+LLM 时序优化：追问措辞已合并进评估 LLM（原独立 _llm_followup 删除），本测试改走评估入口。
+顺带验证：追问方向（缺失信号→可挖掘点）一致，只是措辞随人设变化（按图索骥 + 风格化）。
 
 作者：求职 Copilot 项目
 日期：2026-07-20
@@ -14,12 +15,13 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from src.graph.nodes.mock_interview import _llm_followup
+from src.graph.nodes.mock_interview import _llm_evaluate
 
-# 同一追问场景
+# 同一追问场景（合并后：追问措辞经评估入口 _llm_evaluate 的 next_probe_followup 产出）
 QUESTION = "讲一次你 push 团队达成目标的经历"
 ANSWER = "就那样吧，挺普通的，没什么特别的"
-PROBING_POINT = "具体的数据结果与你个人的贡献"
+IDEAL_SIGNALS = ["量化结果", "个人主动性", "遇到困难与反思"]
+PROBING_POINTS = ["具体的数据结果", "你个人的贡献", "过程中的冲突与化解"]
 
 # 三种人设
 PERSONAS = {
@@ -48,11 +50,13 @@ def run():
     print("=" * 70)
     print(f"\n原问题：{QUESTION}")
     print(f"候选人回答：{ANSWER}")
-    print(f"追问方向（probing_point）：{PROBING_POINT}\n")
+    print(f"理想信号：{IDEAL_SIGNALS}")
+    print(f"可挖掘点：{PROBING_POINTS}\n")
 
     results = {}
     for name, persona in PERSONAS.items():
-        followup = _llm_followup(persona, PROBING_POINT, QUESTION, ANSWER)
+        ev = _llm_evaluate(QUESTION, IDEAL_SIGNALS, PROBING_POINTS, ANSWER, persona)
+        followup = ev.get("next_probe_followup")
         results[name] = followup
         print(f"【{name}】")
         print(f"  → {followup}\n")

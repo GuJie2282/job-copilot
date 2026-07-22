@@ -39,7 +39,7 @@ from langgraph.types import interrupt
 
 from src.graph.state import FullAgentState
 from src.graph.config import get_llm
-from src.graph.prompts import get_evaluation_prompt, get_debrief_prompt, get_followup_prompt
+from src.graph.prompts import get_evaluation_prompt, get_debrief_prompt
 from src.graph.checkpointer import get_interview_checkpointer
 from src.models.base import SessionLocal
 from src.models.profile import JdMatchResultModel
@@ -161,21 +161,24 @@ def interviewer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     is_probe = False
 
     if decision == "probe" and transcript:
-        # 追问：取上轮缺失信号对应的可挖掘点 → LLM 生成带人设口吻的自然追问
+        # 追问：评估时已按缺失信号生成人设化措辞（next_probe_followup）——合并 LLM，省一次往返
         last_eval = (transcript[-1].get("evaluation") or {})
-        miss_map = last_eval.get("miss_probe_map") or {}
-        miss_signals = last_eval.get("miss_signals") or []
-        followup_point = next((miss_map[s] for s in miss_signals if miss_map.get(s)), None)
-        if followup_point:
-            followup = _llm_followup(
-                state.get("persona"), followup_point,
-                transcript[-1].get("question", ""), transcript[-1].get("answer", ""),
-            )
-            # LLM 失败则降级模板
-            question = followup or f"关于你刚才的回答，能具体讲讲——{followup_point}"
+        followup = last_eval.get("next_probe_followup")
+        if followup:
+            question = followup
             qid = transcript[-1].get("qid")
             round_num = transcript[-1].get("round", round_num)
             is_probe = True
+        else:
+            # 评估漏产追问措辞 → 模板降级（无 LLM，零成本兜底）
+            miss_map = last_eval.get("miss_probe_map") or {}
+            miss_signals = last_eval.get("miss_signals") or []
+            followup_point = next((miss_map[s] for s in miss_signals if miss_map.get(s)), None)
+            if followup_point:
+                question = f"关于你刚才的回答，能具体讲讲——{followup_point}"
+                qid = transcript[-1].get("qid")
+                round_num = transcript[-1].get("round", round_num)
+                is_probe = True
 
     if question is None and decision == "enter_qa":
         question = "我的问题问得差不多了。接下来，你有什么想问我的吗？"
@@ -231,8 +234,12 @@ def evaluator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     ideal = pkg.get("ideal_signals", [])
     probing = pkg.get("probing_points", [])
 
-    # LLM 信号差检测（失败降级：保守认为充分，不追问）
-    eval_result = _llm_evaluate(current.get("question", ""), ideal, probing, current.get("answer", ""))
+    # LLM 信号差检测 + 追问措辞（合并：评估时一并按人设口吻产出 next_probe_followup，省一次往返）
+    # 失败降级：保守认为充分，不追问
+    eval_result = _llm_evaluate(
+        current.get("question", ""), ideal, probing, current.get("answer", ""),
+        state.get("persona"),
+    )
 
     # 决策
     decision = _decide(state, eval_result)
@@ -280,24 +287,6 @@ def evaluator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return update
 
 
-def _llm_followup(persona: Optional[Dict[str, Any]], probing_point: str, question: str, answer: str) -> Optional[str]:
-    """
-    LLM 生成带人设口吻的自然追问（替代固定模板）。
-
-    追问【方向】仍由 probing_point 决定（按图索骥），只是【措辞】交给人设化 LLM。
-    失败返回 None，上层降级为模板追问。
-    """
-    try:
-        llm = get_llm(temperature=0.7, timeout=20)  # 追问：20s 超时，失败直接走模板追问降级
-        prompt = get_followup_prompt(persona, probing_point, question, answer)
-        resp = invoke_llm_with_retry(llm, prompt, max_retries=0)  # 不重试（失败有模板兜底，不拖面试）
-        text = (resp.content or "").strip().strip('「」“”"\'').split("\n")[0].strip()
-        return text if text else None
-    except Exception as e:
-        logger.warning(f"追问生成 LLM 失败，降级模板：{type(e).__name__}: {e}")
-        return None
-
-
 def _clean_eval_text(value) -> Optional[str]:
     """清洗 LLM 返回的 highlight/weakness 文本：去除占位符与 null 语义。"""
     if not value or not isinstance(value, str):
@@ -313,11 +302,21 @@ def _clean_eval_text(value) -> Optional[str]:
     return s
 
 
-def _llm_evaluate(question: str, ideal_signals: list, probing_points: list, answer: str) -> Dict[str, Any]:
-    """调 LLM 做信号差检测。任何失败 → 降级（保守认为充分，不追问）。"""
+def _llm_evaluate(
+    question: str,
+    ideal_signals: list,
+    probing_points: list,
+    answer: str,
+    persona: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    调 LLM 做信号差检测 + 追问措辞（合并）。
+    追问措辞 next_probe_followup 按人设口吻一并产出，省一次 LLM 往返（原「评估+追问」两次串行 → 一次）。
+    任何失败 → 降级（保守认为充分，不追问）。
+    """
     try:
-        llm = get_llm(temperature=0, timeout=30)  # 评估：30s 短超时快速降级（答题循环内，不拖整轮）
-        prompt = get_evaluation_prompt(question, ideal_signals, probing_points, answer)
+        llm = get_llm(temperature=0, timeout=20)  # 评估：20s 短超时快速降级（答题循环内，不拖整轮）
+        prompt = get_evaluation_prompt(question, ideal_signals, probing_points, answer, persona)
         resp = invoke_llm_with_retry(llm, prompt, max_retries=1)  # 最多重试 1 次，减少累积延迟
         data = _extract_json(resp.content)
         if not isinstance(data, dict):
@@ -329,6 +328,7 @@ def _llm_evaluate(question: str, ideal_signals: list, probing_points: list, answ
             "score": data.get("score"),
             "highlight": _clean_eval_text(data.get("highlight")),
             "weakness": _clean_eval_text(data.get("weakness")),
+            "next_probe_followup": _clean_eval_text(data.get("next_probe_followup")),
         }
     except Exception as e:
         logger.warning(f"评估 LLM 失败，降级（保守不追问）：{type(e).__name__}: {e}")
@@ -339,6 +339,7 @@ def _llm_evaluate(question: str, ideal_signals: list, probing_points: list, answ
             "score": 70,
             "highlight": None,
             "weakness": None,
+            "next_probe_followup": None,
         }
 
 
