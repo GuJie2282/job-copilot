@@ -26,3 +26,12 @@ data/*
 !data/.gitkeep
 # 面试会话状态库（checkpointer 持久化，运行时生成）
 backend/interview_checkpoints.db
+backend/interview_checkpoints.db-shm
+backend/interview_checkpoints.db-wal
+
+# 应用数据库（运行时生成，schema 由 Base.metadata.create_all 初始化，勿提交）
+/job_copilot.db
+backend/job_copilot.db
+
+# 前端测试产物（Playwright 运行结果，勿提交）
+web/test-results/
