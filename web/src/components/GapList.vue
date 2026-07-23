@@ -20,7 +20,7 @@
       </div>
       <div class="gap-body">
         <div class="row"><span class="k">现状：</span>{{ g.current_state || '画像中未体现' }}</div>
-        <div class="row"><span class="k">建议：</span>{{ g.suggestion }}</div>
+        <div class="row"><span class="k">建议：</span>{{ g.suggestion || '（正在生成建议…）' }}</div>
       </div>
     </div>
   </div>

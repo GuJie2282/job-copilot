@@ -44,3 +44,20 @@ export async function getDebrief(sessionId: string) {
 export async function listSessions(userId: string) {
   return await client.get('/interview/sessions', { params: { user_id: userId } })
 }
+
+/**
+ * 语音转文本（add-voice-interview：语音回答模式）。
+ * 上传录音 Blob → 后端 faster-whisper 转写 → 返回文本。
+ * 前端拿到文本后，以 answer 调 submitAnswer，与文字模式汇合（零侵入）。
+ *
+ * timeout 30s：后端 small 模型 CPU 转写 15-30s 录音约 4-8s，留足余量。
+ *
+ * 响应是后端 ApiResponse：成功 {status:'success', data:{text}}，
+ * 失败 {status:'error', data:{error_code}}（error_code 供前端区分降级提示）。
+ */
+export async function transcribeVoice(blob: Blob) {
+  const form = new FormData()
+  // 文件名仅辅助后端取扩展名，faster-whisper 经 PyAV 按内容识别格式
+  form.append('file', blob, 'answer.webm')
+  return await client.post('/interview/voice/transcribe', form, { timeout: 30000 })
+}

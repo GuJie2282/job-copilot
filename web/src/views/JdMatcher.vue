@@ -1,10 +1,10 @@
 <template>
   <div class="page">
-    <!-- 页头 -->
+    <!-- 页头：副标匹配后会变成动态论点（强项/短板） -->
     <header class="page-head">
       <p class="eyebrow">MATCH</p>
       <h1>JD 匹配</h1>
-      <p class="sub">粘贴目标岗位 JD，AI 解析要求并与你的画像比对，给出匹配度与差距清单。</p>
+      <p class="sub">{{ headSub }}</p>
     </header>
 
     <!-- 画像缺失引导 -->
@@ -45,19 +45,24 @@
 
     <!-- 匹配结果 -->
     <div v-if="result" class="result">
-      <!-- 总分 + 维度雷达图 -->
+      <!-- SIGNATURE：匹配度拆解仪表（总分 + 四维度条形，编码"强在哪/弱在哪"） -->
       <section class="card score-card">
         <div class="overall">
           <div class="overall-score tnum" :style="{ color: scoreColor }">{{ result.overall_score ?? '-' }}</div>
           <div class="overall-level">{{ result.level }}</div>
           <div class="overall-hint">总分 / 100</div>
         </div>
-        <ScoreRadar
-          :skill="result.dimension_scores?.skill"
-          :experience="result.dimension_scores?.experience"
-          :education="result.dimension_scores?.education"
-          :soft-skill="result.dimension_scores?.soft_skill"
-        />
+        <div class="dims">
+          <div v-for="d in dimensionBars" :key="d.key" class="dim">
+            <div class="dim-head">
+              <span class="dim-name">{{ d.name }}</span>
+              <span class="dim-score tnum" :style="{ color: d.color }">{{ d.score ?? '-' }}</span>
+            </div>
+            <div class="dim-track">
+              <div class="dim-fill" :style="{ width: dimWidth(d.score), background: d.color }" />
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- 红线预警 -->
@@ -106,26 +111,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { matchJd, matchHistory, matchDetail } from '@/api/jd'
+import { matchJd, enrichGaps, matchHistory, matchDetail } from '@/api/jd'
 import type { MatchResult, MatchHistoryItem } from '@/types/jd'
-import ScoreRadar from '@/components/ScoreRadar.vue'
 import GapList from '@/components/GapList.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 
 const jdText = ref('')
-const isLoading = ref(false)
-const progressMessage = ref('')
+const isLoading = ref(false)             // 主链+增补全程 true（textarea 禁用、按钮 loading）
+const progressMessage = ref('')          // 由 SSE stage 事件驱动的真实进度（取代旧定时器模拟）
 const result = ref<MatchResult | null>(null)
+const resultId = ref<string | null>(null)
 const profileMissing = ref(false)
 const history = ref<MatchHistoryItem[]>([])
 const historyLoading = ref(false)
-let progressTimer: ReturnType<typeof setInterval> | null = null
+let matchController: AbortController | null = null
 
 // 分数配色：对齐设计 token（success / warning / error）
 function colorFor(s?: number) {
@@ -138,57 +143,123 @@ function histColor(s?: number) {
   return colorFor(s)
 }
 
+// SIGNATURE 数据：四维度匹配条（编码"强在哪/弱在哪"）
+const dimensionBars = computed(() => {
+  const d = result.value?.dimension_scores || ({} as any)
+  return [
+    { key: 'skill', name: '硬技能', score: d.skill },
+    { key: 'experience', name: '经验', score: d.experience },
+    { key: 'education', name: '学历', score: d.education },
+    { key: 'soft_skill', name: '软素质', score: d.soft_skill },
+  ].map((it) => ({ ...it, color: colorFor(it.score) }))
+})
+
+// 维度条填充宽度（分数→百分比，无分时 0）
+function dimWidth(s?: number): string {
+  return `${Math.max(0, Math.min(100, s ?? 0))}%`
+}
+
+// HERO 副标：匹配后变成动态论点（强项/短板），未匹配时是引导语
+const headSub = computed(() => {
+  const r = result.value
+  if (!r) return '粘贴目标岗位 JD，AI 解析要求并与你的画像比对，给出匹配度与差距清单。'
+  const ranked = [...dimensionBars.value]
+    .filter((d) => d.score != null)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+  if (ranked.length === 0) return `匹配度 ${r.overall_score ?? '-'}（${r.level || '—'}）。`
+  const top = ranked[0]
+  const weak = ranked[ranked.length - 1]
+  if (top.score === weak?.score) {
+    return `匹配度 ${r.overall_score ?? '-'}（${r.level || '—'}）· 各维度均衡（${top.score}）。`
+  }
+  return `匹配度 ${r.overall_score ?? '-'}（${r.level || '—'}）· 强项 ${top.name} ${top.score} · 短板 ${weak?.name ?? ''} ${weak?.score ?? ''}。`
+})
+
 function joinReqs(arr?: { requirement?: string }[]) {
   if (!arr || arr.length === 0) return '—'
   return arr.map((a) => a.requirement || '').filter(Boolean).join('、') || '—'
 }
 
-// 分阶段进度提示（前端基于时间模拟，后端同步返回）
-function startProgress() {
-  const stages = ['正在校验 JD…', '正在解析 JD 要求…', '正在加载你的画像…', '正在比对匹配度…', '正在生成差距分析…', '即将完成…']
-  let i = 0
-  progressMessage.value = stages[0] ?? '分析中…'
-  progressTimer = setInterval(() => {
-    i = (i + 1) % stages.length
-    progressMessage.value = stages[i] ?? progressMessage.value
-  }, 3500)
-}
-function stopProgress() {
-  if (progressTimer) clearInterval(progressTimer)
-  progressTimer = null
-}
-
-async function onMatch() {
+// onMatch：流式匹配 + 两段式渲染（分数先出 → 规则 Gap 骨架 → enrich 回填建议）
+function onMatch() {
   if (jdText.value.trim().length < 50) {
     ElMessage.warning('JD 内容过少，请粘贴更完整的职位描述')
     return
   }
+  // 重置状态（isLoading 持续到增补结束，期间 textarea 禁用、按钮 loading）
   isLoading.value = true
   profileMissing.value = false
   result.value = null
-  startProgress()
+  resultId.value = null
+  progressMessage.value = '正在校验 JD…'
+
+  matchController = matchJd(
+    { jd_text: jdText.value, user_id: userStore.userId },
+    {
+      // 真实进度（取代旧的定时器模拟）
+      onStage: (p) => { progressMessage.value = p.message },
+      // 分数秒出：先把 hero（总分 + 四维度）渲染出来
+      onScore: (s) => {
+        result.value = {
+          ...(result.value || {}),
+          overall_score: s.overall_score,
+          level: s.level,
+          dimension_scores: s.dimension_scores,
+          redline_hit: s.redline_hit,
+        }
+        resultId.value = s.result_id || null
+      },
+      // 规则 Gap 骨架到位（隐性 Gap 显示"分析中…"）
+      onDone: (d) => {
+        result.value = {
+          ...(result.value || {}),
+          result_id: d.result_id,
+          job_profile: d.job_profile,
+          gaps: d.gaps,
+        }
+        resultId.value = d.result_id || resultId.value
+        progressMessage.value = '正在补充差距建议…'
+        ElMessage.success('匹配完成，正在补充差距建议…')
+        loadHistory()        // 分数已出，先刷新历史
+        loadEnrichments()    // 触发增补链
+      },
+      onError: (e) => {
+        isLoading.value = false
+        if (e.error_code === 'PROFILE_MISSING') {
+          profileMissing.value = true
+          ElMessage.warning('请先建立个人画像')
+        } else {
+          ElMessage.error(e.error_message || '匹配失败')
+        }
+      },
+    },
+  )
+}
+
+// 增补链：补全隐性判断 + Gap 建议，回填到骨架
+async function loadEnrichments() {
+  if (!resultId.value) {
+    isLoading.value = false
+    return
+  }
   try {
-    const res = await matchJd({ jd_text: jdText.value, user_id: userStore.userId })
-    if (res.status === 'success' && res.data) {
-      result.value = res.data
-      ElMessage.success('匹配完成')
-      loadHistory()  // 刷新历史
-    } else {
-      const code = (res as any).error_code || (res.data as any)?.error_code
-      if (code === 'PROFILE_MISSING') {
-        profileMissing.value = true
-        ElMessage.warning('请先建立个人画像')
-      } else {
-        ElMessage.error(res.message || '匹配失败')
-      }
+    const res = await enrichGaps(resultId.value, { user_id: userStore.userId })
+    if (res.status === 'success' && res.data && result.value) {
+      result.value = { ...result.value, gaps: res.data.gaps }
+      ElMessage.success('差距建议已补充')
     }
-  } catch (e: any) {
-    ElMessage.error(e?.message || '匹配失败，请稍后重试')
+  } catch {
+    // 增补失败：保留规则骨架 + 模板建议，不阻断展示
+    ElMessage.warning('部分差距建议补充失败，已展示模板建议')
   } finally {
-    stopProgress()
     isLoading.value = false
   }
 }
+
+// 组件卸载时取消进行中的流（避免离开页面后回调报错）
+onUnmounted(() => {
+  matchController?.abort()
+})
 
 function goBuildProfile() {
   router.push('/resume-parser')
@@ -247,6 +318,8 @@ onMounted(() => {
   max-width: 820px;
   margin: 0 auto;
   padding: $spacing-3xl $spacing-xl;
+  // 减顶栏 65px，避免内容不满一屏时底部空白溢出（与 Home 同款修复）
+  min-height: calc(100vh - 65px);
 }
 
 .page-head {
@@ -425,21 +498,22 @@ onMounted(() => {
   margin-top: $spacing-xl;
 }
 
+/* SIGNATURE：匹配度拆解仪表 —— 总分 + 四维度条形 */
 .score-card {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: $spacing-2xl;
-  flex-wrap: wrap;
-  justify-content: center;
 }
 
 .overall {
   text-align: center;
+  min-width: 96px;
 }
 
 .overall-score {
   font-family: $font-heading;
-  font-size: 72px;
+  font-size: 64px;
   font-weight: $font-weight-bold;
   line-height: 1;
 }
@@ -448,13 +522,51 @@ onMounted(() => {
   color: $ink;
   margin-top: $spacing-sm;
   font-weight: $font-weight-semibold;
-  font-size: $font-size-lg;
+  font-size: $font-size-base;
 }
 
 .overall-hint {
   color: $text-secondary;
   font-size: $font-size-xs;
   margin-top: $spacing-xs;
+}
+
+.dims {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+  min-width: 0;
+}
+
+.dim-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: $spacing-xs;
+
+  .dim-name {
+    font-size: $font-size-sm;
+    color: $text-secondary;
+  }
+
+  .dim-score {
+    font-family: $font-heading;
+    font-weight: $font-weight-bold;
+    font-size: $font-size-base;
+  }
+}
+
+.dim-track {
+  height: 8px;
+  background: $bg-gray;
+  border-radius: $radius-full;
+  overflow: hidden;
+}
+
+.dim-fill {
+  height: 100%;
+  border-radius: $radius-full;
+  transition: width $transition-slow ease;
 }
 
 .redline-alert {
@@ -538,11 +650,14 @@ onMounted(() => {
   }
 
   .overall-score {
-    font-size: 56px;
+    font-size: 52px;
   }
 
+  // 窄屏：拆解仪表转单列（总分在上，维度条在下）
   .score-card {
+    grid-template-columns: 1fr;
     gap: $spacing-lg;
+    justify-items: center;
   }
 }
 </style>

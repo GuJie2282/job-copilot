@@ -112,16 +112,19 @@ export async function healthCheck() {
 // ============================================================================
 
 /**
- * 生成简历（路径 A）：基于画像 + Gap 从零生成。
- * timeout 90 秒：生成 + 6 维评估 + 最多 3 轮迭代 + 导出，串行多 LLM。
+ * 生成简历（路径 A）：基于画像 + 目标岗位从零生成。
+ * - 方式 A：target_position + jd_text（粘贴 JD，可选）
+ * - 方式 B：target_position + jd_result_id（关联 JD 匹配，读 Gap）
+ * timeout 300 秒：生成 + 6 维评估 + 最多 3 轮迭代 + 导出，串行多 LLM（实测 2-5 分钟）。
  */
 export async function generateResume(data: {
   target_position: string
   jd_result_id?: string
+  jd_text?: string
   gaps?: any[]
   user_id?: string
 }) {
-  return await client.post('/resume/generate', data, { timeout: 90000 })
+  return await client.post('/resume/generate', data, { timeout: 300000 })
 }
 
 /**
@@ -154,12 +157,12 @@ export async function refineResume(
   resumeId: string,
   data: { user_id: string; feedback?: string }
 ) {
-  return await client.post(`/resume/${resumeId}/refine`, data, { timeout: 90000 })
+  return await client.post(`/resume/${resumeId}/refine`, data, { timeout: 180000 })
 }
 
 /**
  * 定稿（路径 B）：校验 + 导出 HTML + 落库 finalized
  */
 export async function finalizeResume(resumeId: string, data: { user_id: string }) {
-  return await client.post(`/resume/${resumeId}/finalize`, data, { timeout: 60000 })
+  return await client.post(`/resume/${resumeId}/finalize`, data, { timeout: 120000 })
 }

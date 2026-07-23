@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage
 
 from src.services.jd_parser import parse_jd
 from src.services.matcher import calculate_match
-from src.services.gap_analyzer import analyze_gaps
+from src.services.gap_analyzer import build_gap_skeleton
 from src.services.profile_service import get_profile, get_profile_confidence
 from src.models.profile import JdMatchResultModel
 from src.models.base import SessionLocal
@@ -148,7 +148,8 @@ def match_calc_node(state: Dict[str, Any]) -> Dict[str, Any]:
             "messages": [AIMessage(content="❌ 缺少 JD 要求或用户画像，无法匹配")],
         }
     try:
-        result = calculate_match(job_profile, user_profile, confidence)
+        # with_implicit=False：评分链跳过隐性偏好 LLM（不影响总分），隐性项交由增补链 enrich
+        result = calculate_match(job_profile, user_profile, confidence, with_implicit=False)
         dims = result["dimension_scores"]
         return {
             "match_result": result,
@@ -168,32 +169,18 @@ def match_calc_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ============================================================================
-# 6. gap_analysis_node：差距分析
+# 6. report_format_node：写库（评分链终点）+ 组装报告骨架
 # ============================================================================
-
-def gap_analysis_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """调用 gap_analyzer 生成 Gap 清单（失败不阻断，返回空清单）。"""
-    job_profile = state.get("job_profile")
-    user_profile = state.get("user_profile")
-    match_result = state.get("match_result")
-    try:
-        gaps = analyze_gaps(job_profile, user_profile, match_result)
-        return {"gaps": gaps, "messages": [AIMessage(content=f"✅ 差距分析完成：{len(gaps)} 个 Gap")]}
-    except Exception as e:
-        logger.warning(f"差距分析出错（不阻断）：{e}")
-        return {"gaps": [], "messages": [AIMessage(content=f"⚠️ 差距分析出错：{e}")]}
-
-
-# ============================================================================
-# 7. report_format_node：写库 + 组装报告
-# ============================================================================
+# 注：原 gap_analysis 节点（隐性判断 + Gap 建议 LLM）已移出主图，改由独立的
+# /api/jd/{id}/enrich 增补端点处理——评分链只剩 1 次 LLM（JD 解析），分数秒出。
+# 此节点负责：生成规则 Gap 骨架（隐性占位"分析中"）+ 持久化 + 组装报告。
 
 def report_format_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """持久化匹配结果到 jd_match_results，并组装报告消息。"""
     user_id = state.get("user_id")
     match_result = state.get("match_result", {})
-    gaps = state.get("gaps", [])
     job_profile = state.get("job_profile", {})
+    gaps = build_gap_skeleton(job_profile, match_result)  # 规则骨架（隐性占位"分析中"），无 LLM
     jd_text = state.get("jd_text", "")
     confidence = state.get("match_confidence")
     dims = match_result.get("dimension_scores", {})
@@ -238,6 +225,7 @@ def report_format_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "result_id": result_id,
         "match_status": "success",
+        "gaps": gaps,  # 规则 Gap 骨架（供 SSE done 事件下发；增补建议由 enrich 端点回填）
         "messages": [AIMessage(content=report)],
     }
 
@@ -267,5 +255,5 @@ def route_after_profile_load(state: Dict[str, Any]) -> str:
 
 
 def route_after_match(state: Dict[str, Any]) -> str:
-    """match_calc 后：失败 → END；否则 → gap_analysis"""
-    return "end" if state.get("match_status") == "error" else "gap"
+    """match_calc 后：失败 → END；否则 → report_format（评分链终点，持久化骨架）"""
+    return "end" if state.get("match_status") == "error" else "report"

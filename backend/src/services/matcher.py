@@ -378,6 +378,7 @@ def calculate_match(
     job_profile: Dict[str, Any],
     user_profile: Dict[str, Any],
     profile_confidence: Optional[Dict] = None,
+    with_implicit: bool = True,
 ) -> Dict[str, Any]:
     """
     计算画像与 JD 的匹配度（混合式）。
@@ -386,6 +387,10 @@ def calculate_match(
         job_profile:        JD 解析出的要求画像（四分类 dict）
         user_profile:       用户个人画像（dict）
         profile_confidence: 画像字段置信度（可选，用于标注低置信度项）
+        with_implicit:      是否调用 LLM 判断隐性偏好（默认 True）。
+                            评分链传 False 跳过——隐性判断不影响总分（overall 仅由
+                            技能/经验/学历/软技能 + 红线惩罚得出），隐性项交由增补链
+                            enrich 处理，从而把评分链的 LLM 调用压到 1 次（仅 JD 解析）。
     Returns:
         match_result dict：
           overall_score, level, dimension_scores, matched_items, redline_hit
@@ -396,8 +401,11 @@ def calculate_match(
     exp_score, exp_items = _match_experience(job_profile, user_profile)
     edu_score, edu_items = _match_education(job_profile, user_profile)
 
-    # 2. 隐性偏好（LLM）
-    implicit_items = judge_implicit(job_profile.get("implicit_preferences", []), user_profile)
+    # 2. 隐性偏好（LLM）—— 评分链（with_implicit=False）跳过，交由增补链 enrich 处理
+    if with_implicit:
+        implicit_items = judge_implicit(job_profile.get("implicit_preferences", []), user_profile)
+    else:
+        implicit_items = []
 
     # 3. 红线
     redline_items = _check_redlines(job_profile.get("red_lines", []), user_profile)

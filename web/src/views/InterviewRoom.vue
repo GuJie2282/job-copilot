@@ -8,6 +8,7 @@
         <div class="header-title">
           AI 面试官
           <span :class="['mode-tag', mode]">{{ mode === 'coach' ? '教练模式' : '实战模式' }}</span>
+          <span v-if="inputMode === 'voice'" class="mode-tag voice">语音</span>
         </div>
         <div class="header-sub">
           <span v-if="typeLabel">{{ typeLabel }}</span>
@@ -35,6 +36,9 @@
             :text="m.text"
             :is-probe="m.isProbe"
             :is-q-a="m.isQA"
+            :kind="m.kind"
+            :duration="m.duration"
+            :voice-status="m.voiceStatus"
           />
           <!-- 等待后端（评估/出题） -->
           <div v-if="submitting" class="typing">
@@ -55,23 +59,72 @@
 
     <!-- 底部输入栏 -->
     <footer class="input-bar">
-      <textarea
-        ref="inputEl"
-        v-model="answer"
-        class="answer-input"
-        placeholder="输入你的回答…（Ctrl/⌘ + Enter 发送）"
-        :disabled="!currentQuestion"
-        rows="2"
-        @keydown="onKeydown"
-      />
-      <button
-        class="btn-primary btn-send"
-        type="button"
-        :disabled="submitting || !answer.trim() || !currentQuestion"
-        @click="onSend"
-      >
-        {{ submitting ? '发送中…' : '发送' }}
-      </button>
+      <!-- 文字模式（原有逻辑完全不变） -->
+      <template v-if="inputMode === 'text'">
+        <textarea
+          ref="inputEl"
+          v-model="answer"
+          class="answer-input"
+          placeholder="输入你的回答…（Ctrl/⌘ + Enter 发送）"
+          :disabled="!currentQuestion"
+          rows="2"
+          @keydown="onKeydown"
+        />
+        <button
+          class="btn-primary btn-send"
+          type="button"
+          :disabled="submitting || !answer.trim() || !currentQuestion"
+          @click="onSend"
+        >
+          {{ submitting ? '发送中…' : '发送' }}
+        </button>
+      </template>
+
+      <!-- 语音模式：状态机指引栏（收音跟随面试状态） -->
+      <div v-else class="voice-bar">
+        <!-- idle：等面试官出题 -->
+        <div v-if="voiceState === 'idle'" class="voice-hint">
+          <span class="spinner sm" />
+          <span>面试官正在准备问题…</span>
+        </div>
+
+        <!-- listening：收音中 -->
+        <div v-else-if="voiceState === 'listening'" class="voice-row">
+          <span class="voice-wave"><i /><i /><i /><i /><i /></span>
+          <span class="voice-time">正在聆听 {{ formatDuration(recDuration) }}</span>
+          <button class="btn-ghost" type="button" @click="onPause">⏸ 暂停</button>
+          <button class="btn-primary btn-finish" type="button" @click="finishRecording">⏹ 说完了</button>
+        </div>
+
+        <!-- paused：已暂停 -->
+        <div v-else-if="voiceState === 'paused'" class="voice-row">
+          <span class="voice-wave paused"><i /><i /><i /><i /><i /></span>
+          <span class="voice-time">已暂停 {{ formatDuration(recDuration) }}</span>
+          <button class="btn-ghost" type="button" @click="onResume">▶ 继续</button>
+          <button class="btn-primary btn-finish" type="button" @click="finishRecording">⏹ 说完了</button>
+        </div>
+
+        <!-- recognizing：识别中 -->
+        <div v-else-if="voiceState === 'recognizing'" class="voice-hint">
+          <span class="spinner sm" />
+          <span>正在识别你的回答…</span>
+        </div>
+
+        <!-- submitting：评估中 -->
+        <div v-else-if="voiceState === 'submitting'" class="voice-hint">
+          <span class="spinner sm" />
+          <span>面试官正在评估…</span>
+        </div>
+
+        <!-- failed：识别失败（2.3 基本版，3.x 完善语音条标红） -->
+        <div v-else-if="voiceState === 'failed'" class="voice-row voice-failed">
+          <span>⚠ {{ failedMessage }}</span>
+          <button class="btn-ghost" type="button" @click="retryVoice">重新录制</button>
+          <button class="btn-text" type="button" @click="switchToText">切文字</button>
+        </div>
+
+        <button v-if="voiceState !== 'failed'" class="btn-text btn-text-right" type="button" @click="switchToText">切换文字</button>
+      </div>
     </footer>
   </div>
 </template>
@@ -81,7 +134,8 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import MessageBubble from '@/components/MessageBubble.vue'
-import { getSession, submitAnswer } from '@/api/interview'
+import { getSession, submitAnswer, transcribeVoice } from '@/api/interview'
+import { useRecorder } from '@/composables/useRecorder'
 import { INTENSITY_LABELS } from '@/types/interview'
 import type { Question, InterviewMode } from '@/types/interview'
 
@@ -95,6 +149,9 @@ interface ChatMessage {
   text: string
   isProbe?: boolean
   isQA?: boolean
+  kind?: 'text' | 'voice'       // user 消息：文字气泡 / 语音条（3.x 起用语音条呈现）
+  duration?: number             // voice 时长（秒）
+  voiceStatus?: 'done' | 'failed' // voice 识别状态（3.x 起用）
 }
 
 const messages = ref<ChatMessage[]>([])
@@ -111,6 +168,24 @@ const progressMessage = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 let progressTimer: ReturnType<typeof setInterval> | null = null
+
+// ── 语音模式状态（add-voice-interview）──
+// inputMode：route.query.mode 优先（Setup 显式选），否则 localStorage 记忆，默认文字
+const inputMode = ref<'text' | 'voice'>(
+  route.query['mode'] === 'voice' ? 'voice'
+    : (localStorage.getItem('interview_input_mode') === 'voice' ? 'voice' : 'text')
+)
+// voiceState：收音状态机——idle/listening/paused/recognizing/submitting/failed
+type VoiceState = 'idle' | 'listening' | 'paused' | 'recognizing' | 'submitting' | 'failed'
+const voiceState = ref<VoiceState>('idle')
+const failedMessage = ref('识别失败')
+
+// 录音引擎（onAutoStop：达 5 分钟上限自动结束，走与手动结束相同的转写提交流程）
+const recorder = useRecorder({
+  maxSeconds: 300,
+  onAutoStop: (blob: Blob) => handleRecordedBlob(blob, recorder.duration.value),
+})
+const { status: recStatus, error: recError, duration: recDuration, start: recStart, pause: recPause, resume: recResume, stop: recStop, cancel: recCancel } = recorder
 
 const typeLabel = computed(() => TYPE_LABELS[interviewType.value] || '')
 const intensityLabel = computed(() => INTENSITY_LABELS[intensity.value as keyof typeof INTENSITY_LABELS] || '')
@@ -183,13 +258,20 @@ function stopProgress() {
   progressTimer = null
 }
 
-async function onSend() {
-  const text = answer.value.trim()
+/**
+ * 提交回答的核心逻辑（文字/语音共用，零侵入：语音识别结果以文本接入）。
+ * 文字模式传 kind:'text'；语音模式传 kind:'voice' + duration（3.x 起语音条呈现）。
+ */
+async function sendAnswer(text: string, opts: { kind?: 'text' | 'voice'; duration?: number } = {}) {
   if (!text || !currentQuestion.value || submitting.value) return
-
-  // 用户消息立即入列（不等后端，体验顺滑）
-  messages.value.push({ role: 'user', text })
-  answer.value = ''
+  // user 消息立即入列（2.3：语音消息也带 text，MessageBubble 暂按文字渲染；3.x 改语音条）
+  messages.value.push({
+    role: 'user',
+    text,
+    kind: opts.kind ?? 'text',
+    duration: opts.duration,
+    voiceStatus: opts.kind === 'voice' ? 'done' : undefined,
+  })
   submitting.value = true
   startProgress()
   try {
@@ -228,6 +310,14 @@ async function onSend() {
   }
 }
 
+// 文字模式发送
+async function onSend() {
+  const text = answer.value.trim()
+  if (!text || !currentQuestion.value || submitting.value) return
+  answer.value = ''
+  await sendAnswer(text, { kind: 'text' })
+}
+
 // Ctrl/⌘ + Enter 发送；普通 Enter 换行（长回答友好）
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -236,9 +326,135 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// ── 语音模式：录音控制 ──
+function onPause() {
+  recPause()
+  voiceState.value = 'paused'
+}
+function onResume() {
+  recResume()
+  voiceState.value = 'listening'
+}
+
+/** 用户点"说完了"：停止录音 → 识别 → 提交 */
+async function finishRecording() {
+  if (voiceState.value !== 'listening' && voiceState.value !== 'paused') return
+  const seconds = recDuration.value
+  const blob = await recStop()
+  voiceState.value = 'idle' // 临时态，handleRecordedBlob 会推进
+  if (!blob || blob.size === 0) {
+    failedMessage.value = '未录到内容，请重新回答'
+    voiceState.value = 'failed'
+    return
+  }
+  await handleRecordedBlob(blob, seconds)
+}
+
+/** 拿到录音 Blob → 转写 → 接入 sendAnswer（与手动结束共用，onAutoStop 也走这里） */
+async function handleRecordedBlob(blob: Blob, seconds: number) {
+  voiceState.value = 'recognizing'
+  try {
+    const res: any = await transcribeVoice(blob)
+    if (res.status === 'success' && res.data?.text) {
+      voiceState.value = 'submitting'
+      await sendAnswer(res.data.text, { kind: 'voice', duration: seconds })
+      // sendAnswer 完成后 submitting 置 false，watch 会触发下一轮 listening
+      return
+    }
+    // 失败：按 error_code 给提示
+    const code = res?.data?.error_code
+    failedMessage.value = transcribeErrorMsg(code)
+    voiceState.value = 'failed'
+  } catch (e: any) {
+    failedMessage.value = '语音识别失败，可重试或切文字'
+    voiceState.value = 'failed'
+  }
+}
+
+function transcribeErrorMsg(code?: string): string {
+  switch (code) {
+    case 'EMPTY_AUDIO':
+    case 'NO_CONTENT':
+      return '未识别到内容，请重新回答'
+    case 'DECODE_FAILED':
+      return '音频格式异常，请重新录制'
+    case 'TRANSCRIBE_ERROR':
+      return '识别失败，可重试或切文字'
+    default:
+      return '识别失败，可重试或切文字'
+  }
+}
+
+/** 识别失败后重新录制 */
+async function retryVoice() {
+  voiceState.value = 'listening'
+  const ok = await recStart()
+  if (!ok) handleRecorderError(recError.value)
+}
+
+/** 麦克风不可用 → 降级文字（design.md 决策 9） */
+function handleRecorderError(err: any) {
+  inputMode.value = 'text'
+  localStorage.setItem('interview_input_mode', 'text')
+  const msgMap: Record<string, string> = {
+    'permission-denied': '未获得麦克风权限，已切换文字输入',
+    'no-device': '未检测到麦克风，已切换文字输入',
+    'unsupported': '当前浏览器不支持语音输入，已切换文字',
+    'recorder-error': '录音启动失败，已切换文字输入',
+  }
+  ElMessage.warning(msgMap[err as string] || '录音不可用，已切换文字输入')
+}
+
+/** 切换回文字模式 */
+async function switchToText() {
+  if (recStatus.value === 'recording' || recStatus.value === 'paused') {
+    await recCancel()
+  }
+  inputMode.value = 'text'
+  localStorage.setItem('interview_input_mode', 'text')
+  voiceState.value = 'idle'
+}
+
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
 function goBack() {
   router.push('/interview/setup')
 }
+
+/**
+ * 收音跟随面试状态（design.md 决策 5）：
+ *  - submitting 中：确保收音停（评估期间不应有录音残留）
+ *  - 非 submitting 且当前题就绪：自动进入 listening（收音 ON）
+ *  - 无题（面试官准备中）：idle
+ * voiceState 处于 listening/paused 时不打断（用户主动控制中）；
+ * 处于 recognizing/submitting/failed 时由对应流程自管理，不自动推进。
+ */
+watch([currentQuestion, submitting], async () => {
+  if (inputMode.value !== 'voice') return
+  // 评估中：停掉任何残留录音
+  if (submitting.value) {
+    if (recStatus.value === 'recording' || recStatus.value === 'paused') {
+      await recCancel()
+    }
+    return
+  }
+  // 非提交态
+  if (currentQuestion.value) {
+    // 轮到用户：若不在 listening/paused（避免打断用户），自动开始收音
+    if (voiceState.value !== 'listening' && voiceState.value !== 'paused' && voiceState.value !== 'failed') {
+      voiceState.value = 'listening'
+      const ok = await recStart()
+      if (!ok) handleRecorderError(recError.value)
+    }
+  } else {
+    // 无题：空闲
+    if (voiceState.value !== 'idle') voiceState.value = 'idle'
+  }
+})
 
 // 消息变化时自动滚到底
 watch(() => messages.value.length, () => {
@@ -326,6 +542,11 @@ onMounted(() => {
   &.real {
     background: $primary-lighter;
     color: $primary-color;
+  }
+
+  &.voice {
+    background: $warning-light;
+    color: $warning;
   }
 }
 
@@ -494,6 +715,127 @@ onMounted(() => {
   padding: $spacing-sm $spacing-xl;
 }
 
+/* 语音模式指引栏 */
+.voice-bar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  min-height: 56px;
+}
+
+.voice-hint {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  color: $text-secondary;
+  font-size: $font-size-sm;
+  flex: 1;
+}
+
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex: 1;
+}
+
+.voice-time {
+  font-size: $font-size-sm;
+  color: $text-primary;
+  font-weight: $font-weight-medium;
+  min-width: 110px;
+}
+
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e53935;
+  animation: rec-pulse 1.2s infinite;
+  flex-shrink: 0;
+}
+
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* 录音波形：listening 时柱条跳动（让用户「看到」在录），paused 时静止变灰 */
+.voice-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  margin-right: $spacing-xs;
+  flex-shrink: 0;
+
+  i {
+    width: 3px;
+    background: $primary-color;
+    border-radius: 2px;
+    transform-origin: center;
+    animation: voice-wave 1s infinite ease-in-out;
+  }
+  i:nth-child(1) { height: 8px; animation-delay: 0s; }
+  i:nth-child(2) { height: 16px; animation-delay: 0.15s; }
+  i:nth-child(3) { height: 12px; animation-delay: 0.3s; }
+  i:nth-child(4) { height: 18px; animation-delay: 0.45s; }
+  i:nth-child(5) { height: 10px; animation-delay: 0.6s; }
+
+  &.paused i {
+    animation-play-state: paused;
+    background: $text-disabled;
+  }
+}
+
+@keyframes voice-wave {
+  0%, 100% { transform: scaleY(0.5); }
+  50% { transform: scaleY(1); }
+}
+
+.btn-finish {
+  margin-left: auto;
+}
+
+.btn-ghost {
+  background: $bg-white;
+  color: $text-primary;
+  border: 1px solid $border-color;
+  padding: $spacing-xs $spacing-md;
+  border-radius: $radius-md;
+  cursor: pointer;
+  font-size: $font-size-sm;
+  transition: border-color $transition-base ease;
+
+  &:hover {
+    border-color: $primary-color;
+    color: $primary-color;
+  }
+}
+
+.btn-text {
+  background: none;
+  border: none;
+  color: $text-secondary;
+  cursor: pointer;
+  font-size: $font-size-xs;
+  padding: $spacing-xs $spacing-sm;
+
+  &:hover {
+    color: $primary-color;
+  }
+}
+
+.btn-text-right {
+  margin-left: auto;
+}
+
+.voice-failed {
+  color: #e53935;
+  font-size: $font-size-sm;
+}
+
 .spinner {
   width: 16px;
   height: 16px;
@@ -502,11 +844,18 @@ onMounted(() => {
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   display: inline-block;
+  flex-shrink: 0;
 
   &.lg {
     width: 32px;
     height: 32px;
     border-width: 3px;
+  }
+
+  &.sm {
+    width: 14px;
+    height: 14px;
+    border-width: 2px;
   }
 }
 
@@ -531,6 +880,22 @@ onMounted(() => {
     .coach-hint {
       flex: initial;
     }
+  }
+
+  /* 语音控件窄屏适配：按钮缩小、时间不占定宽 */
+  .voice-bar {
+    flex-wrap: wrap;
+    gap: $spacing-sm;
+  }
+
+  .voice-time {
+    min-width: auto;
+  }
+
+  .btn-ghost,
+  .btn-finish {
+    padding: $spacing-xs $spacing-sm;
+    font-size: $font-size-xs;
   }
 }
 </style>

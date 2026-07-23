@@ -115,8 +115,9 @@ def resume_generate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     profile = state.get("profile_snapshot") or {}
     gaps = state.get("gaps_snapshot") or []
     target_position = state.get("target_position")
+    jd_text = state.get("jd_text")
     try:
-        md = generate_resume(profile, gaps, target_position)
+        md = generate_resume(profile, gaps, target_position, jd_text)
         return {
             "resume_md": md,
             "resume_round": (state.get("resume_round") or 0) + 1,  # 生成次数 +1

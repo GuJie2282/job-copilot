@@ -57,3 +57,9 @@ rank_bm25>=0.2.2
 
 # Task Scheduling (for file cleanup)
 apscheduler==3.11.0
+
+# 语音转写（add-voice-interview：模拟面试语音回答）
+# faster-whisper：OpenAI Whisper 的 CTranslate2 加速版，MIT 开源、本地部署、音频不出服务器。
+# 装包会带上 ctranslate2 / av(PyAV,音频解码) / onnxruntime / tokenizers
+faster-whisper==1.2.1
+# 注：pyttsx3 仅 test_voice_*.py 生成中文测试音频用（Windows SAPI 离线 TTS），非生产依赖，按需安装

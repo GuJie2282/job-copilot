@@ -161,6 +161,28 @@
 
 ---
 
+### Requirement: Gap 增补（lazy 加载）
+
+系统 SHALL 将 Gap 的 LLM 增补内容（隐性偏好判断结果与应对建议）从主匹配流程中剥离，通过独立端点 lazy 加载，使用户能先拿到分数。
+
+#### Scenario: 主请求返回 Gap 骨架
+- **WHEN** 评分链（JD 解析 + 规则匹配）完成
+- **THEN** 主请求 SHALL 返回规则可定的 Gap 骨架（硬技能 / 软技能 / 红线类，含现状与严重度）
+- **AND** 隐性偏好类 Gap SHALL 以"分析中"占位，待增补回填
+
+#### Scenario: 增补端点
+- **WHEN** 前端以 result_id 调用 `POST /api/jd/{id}/enrich`
+- **THEN** 系统 SHALL 并行执行隐性偏好判断与 Gap 建议生成（两段 LLM）
+- **AND** 系统 SHALL 将结果 UPDATE 回同一条匹配记录
+- **AND** 响应 SHALL 返回增补后的完整 Gap 清单
+
+#### Scenario: 分数独立性
+- **WHEN** 增补链的 LLM 调用失败或未完成
+- **THEN** 总分与四维度得分 SHALL 仍然可用
+- **AND** 总分 SHALL 仅依赖 JD 解析与规则匹配（技能 / 经验 / 学历 / 软技能 + 红线惩罚），不依赖隐性偏好判断与 Gap 建议
+
+---
+
 ### Requirement: 匹配结果持久化
 
 系统 SHALL 将每次 JD 匹配的结果持久化存储，支持用户回看历史匹配。
@@ -180,6 +202,12 @@
 - **THEN** 系统 SHALL 能展示该次的原始 JD、要求画像与 Gap 依据
 - **AND** 系统 SHALL 不依赖外部状态即可还原分析过程
 
+#### Scenario: 持久化时机（前移，支撑流式）
+- **WHEN** 匹配计算完成、分数已得出
+- **THEN** 系统 SHALL 立即将分数与规则 Gap 骨架写入匹配记录并生成 result_id
+- **AND** result_id SHALL 在分数 SSE 事件中下发（供前端调用增补端点）
+- **AND** 增补端点完成后 SHALL UPDATE 同一行（回填隐性判断与 Gap 建议）
+
 ---
 
 ### Requirement: 匹配报告输出
@@ -194,6 +222,36 @@
 - **WHEN** 报告展示给用户
 - **THEN** 系统 SHALL 以分维度形式呈现得分（支持雷达图等可视化数据）
 - **AND** 系统 SHALL 将 Gap 清单分组展示并附建议
+
+---
+
+### Requirement: 流式匹配输出（SSE 阶段推送）
+
+系统 SHALL 以 SSE（Server-Sent Events）流式输出 JD 匹配的阶段进度与结果，取代一次性同步返回，消除长请求超时。
+
+#### Scenario: 阶段进度实时推送
+- **WHEN** 匹配流程在节点间推进
+- **THEN** 系统 SHALL 在每个节点完成后下发 SSE 事件（如 `event: stage`，携带阶段名与提示文案）
+- **AND** 阶段 SHALL 覆盖：接收 JD / 质量检查 / 解析 JD / 加载画像 / 匹配计算
+
+#### Scenario: 分数优先可见
+- **WHEN** 匹配计算（match_calc）节点完成
+- **THEN** 系统 SHALL 立即下发分数事件（总分 / 四维度 / level / result_id）
+- **AND** 该下发 SHALL 早于 Gap 增补（隐性判断与建议）完成
+
+#### Scenario: 连接保活
+- **WHEN** 单个节点耗时较长（LLM 调用慢或重试）
+- **THEN** 系统 SHALL 通过持续下发事件保持连接活跃
+- **AND** 系统 SHALL 不因整体耗时触发客户端超时（取代原同步方案的 90 秒超时墙）
+
+#### Scenario: 流式错误事件
+- **WHEN** 流式过程中某节点失败（JD 无效 / 画像缺失 / LLM 失败）
+- **THEN** 系统 SHALL 下发 `event: error`（携带 error_code 与友好文案）
+- **AND** 系统 SHALL 随后正常关闭流
+
+#### Scenario: 异步不阻塞
+- **WHEN** 一个用户正在进行 JD 匹配
+- **THEN** 系统 SHALL 不阻塞其他请求的处理（端点 SHALL 使用异步流式执行，不得在 async 端点中同步阻塞事件循环）
 
 ---
 
@@ -220,26 +278,26 @@
 
 ### Requirement: API 响应格式
 
-系统 SHALL 返回统一的 JD 匹配 API 响应格式。
+系统 SHALL 对 JD 匹配的 match 端点返回 SSE 事件流，对 Gap 增补端点返回统一 JSON。
 
-#### Scenario: 成功响应
-- **WHEN** JD 匹配成功
-- **THEN** 响应 SHALL 包含：
-  - `status`: "success" | "warning"
-  - `overall_score`: 总分（0-100）
-  - `dimension_scores`: 四维度得分对象
-  - `job_profile`: 解析出的要求画像
-  - `gaps`: Gap 清单数组
-  - `confidence`: 各项置信度
-  - `result_id`: 持久化结果的标识
+#### Scenario: match 端点 SSE 事件流
+- **WHEN** 前端 POST `/api/jd/match`
+- **THEN** 响应 SHALL 为 `text/event-stream`，由以下事件组成：
+  - `event: stage` — 阶段进度（阶段名 + 提示文案）
+  - `event: score` — 分数（overall_score / dimension_scores / level / result_id）
+  - `event: done` — 主链结束（携带规则 Gap 骨架与 job_profile）
+  - `event: error` — 失败（error_code + error_message）
+
+#### Scenario: enrich 端点 JSON 响应
+- **WHEN** 前端 POST `/api/jd/{id}/enrich` 成功
+- **THEN** 响应 SHALL 为 JSON，包含：
+  - `status`: "success"
+  - `gaps`: 增补后的完整 Gap 清单（含隐性判断结果与应对建议）
 
 #### Scenario: 错误响应
 - **WHEN** JD 匹配失败（画像缺失、JD 无效、LLM 失败）
-- **THEN** 响应 SHALL 包含：
-  - `status`: "error"
-  - `error_code`: 错误类型（如 `PROFILE_MISSING`、`JD_INVALID`、`LLM_FAILED`）
-  - `error_message`: 用户友好的错误描述
-  - `suggestions`: 引导下一步操作的数组
+- **THEN** 系统 SHALL 通过 `event: error` 下发
+- **AND** 事件 SHALL 携带 `error_code`（如 `PROFILE_MISSING`、`JD_INVALID`、`LLM_FAILED`）与用户友好的 `error_message`
 
 ---
 
@@ -332,5 +390,5 @@
 
 ### 性能边界
 - JD 结构化解析：< 10 秒
-- 匹配计算（含隐性判断 LLM 调用）：< 15 秒
-- 端到端（JD 输入 → 报告）：< 30 秒
+- 评分链（JD 解析 + 规则四维度 + 红线，不含隐性判断/Gap 建议）：< 30 秒（目标约 10 秒；SSE 流式中分数优先可见）
+- 增补链（隐性偏好判断 + Gap 建议生成，lazy 端点、两段 LLM 并行）：另约 20-30 秒（不阻塞，用户已见分数）

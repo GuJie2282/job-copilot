@@ -124,6 +124,10 @@ app.include_router(resume_optimize_router, prefix="/api/resume", tags=["简历�
 from src.api.interview import interview_router
 app.include_router(interview_router, prefix="/api/interview", tags=["模拟面试"])
 
+# 注册语音转写路由（add-voice-interview：语音回答模式的后端转写端点，零侵入面试链路）
+from src.api.voice import voice_router
+app.include_router(voice_router, prefix="/api/interview/voice", tags=["语音转写"])
+
 from src.api.knowledge import knowledge_router
 app.include_router(knowledge_router, prefix="/api/knowledge", tags=["面经库"])
 

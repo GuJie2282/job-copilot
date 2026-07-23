@@ -1,11 +1,11 @@
 <template>
   <div class="home">
     <main class="main">
-      <!-- 欢迎区 -->
-      <section class="welcome">
+      <!-- ========== HERO：eyebrow + 宋体巨字 + 动态论点 ========== -->
+      <section class="hero">
         <p class="eyebrow">DASHBOARD</p>
         <h1>你好，{{ userStore.userName }}</h1>
-        <p class="welcome-sub">这是你的求职作战看板。</p>
+        <p class="hero-thesis">{{ thesis }}</p>
       </section>
 
       <!-- 画像加载中 -->
@@ -14,96 +14,80 @@
         <p>正在读取你的画像…</p>
       </div>
 
-      <!-- 画像读取失败：错误 + 重试（不阻断下方链路） -->
+      <!-- 画像读取失败：错误 + 重试 -->
       <div v-else-if="profileState === 'error'" class="state-block">
         <p class="state-title">画像读取失败</p>
         <p class="state-sub">{{ profileError }}</p>
         <button class="btn-primary" type="button" @click="loadProfile">重试</button>
       </div>
 
-      <!-- 新用户：无画像 → 大 CTA -->
-      <div v-else-if="profileState === 'empty'" class="onboard">
-        <p class="onboard-eyebrow">开始你的求职清单</p>
-        <h2 class="onboard-title">先建立画像，AI 才能帮你匹配岗位、优化简历。</h2>
-        <button class="cta" type="button" @click="go('/resume-parser')">
-          开始建立画像 →
-        </button>
-      </div>
-
-      <!-- 有画像：作战看板（画像摘要 + 最近匹配） -->
-      <div v-else class="board">
-        <!-- 画像摘要卡：只显真实计数，不算完成度 -->
-        <section class="card">
-          <div class="card-head">
-            <p class="card-eyebrow">个人画像</p>
-            <button class="link" type="button" @click="go('/profile')">查看 / 完善 →</button>
-          </div>
-          <div class="stats">
-            <div class="stat">
-              <span class="stat-num tnum">{{ workCount }}</span>
-              <span class="stat-label">工作经历</span>
-            </div>
-            <div class="stat">
-              <span class="stat-num tnum">{{ skillCount }}</span>
-              <span class="stat-label">技能项</span>
-            </div>
-            <div class="stat">
-              <span class="stat-num tnum">{{ eduCount }}</span>
-              <span class="stat-label">教育经历</span>
+      <!-- empty / ready：链路条 + 下一步 + 支撑数据 -->
+      <template v-else>
+        <!-- ========== SIGNATURE：求职链路条（编码真实进度） ========== -->
+        <section class="track" aria-label="求职链路进度">
+          <div
+            v-for="s in stages"
+            :key="s.no"
+            class="track-node"
+            :class="s.status"
+            @click="go(s.to)"
+          >
+            <!-- 节点主体：圆点 + 文字 -->
+            <div class="node-dot" />
+            <div class="node-body">
+              <span class="node-no tnum">{{ s.no }}</span>
+              <span class="node-name">{{ s.name }}</span>
+              <span class="node-meta">{{ s.meta }}</span>
             </div>
           </div>
         </section>
 
-        <!-- 最近匹配卡 -->
-        <section class="card">
-          <div class="card-head">
-            <p class="card-eyebrow">最近匹配</p>
-            <button class="link" type="button" @click="go('/jd-matcher')">查看全部 →</button>
+        <!-- ========== 下一步焦点（基于当前阶段） ========== -->
+        <section class="next">
+          <p class="section-label">下一步</p>
+          <div class="next-card" @click="go(nextStep.to)">
+            <div class="next-body">
+              <h3>{{ nextStep.title }}</h3>
+              <p>{{ nextStep.desc }}</p>
+            </div>
+            <button class="next-cta" type="button">
+              {{ nextStep.cta }} <span class="arrow">→</span>
+            </button>
           </div>
-          <div v-if="recentMatches.length > 0" class="match-list">
-            <div
-              v-for="m in recentMatches"
-              :key="m.id"
-              class="match-item"
-              @click="go('/jd-matcher')"
-            >
-              <span class="m-score tnum" :style="{ color: scoreColor(m.overall_score) }">
+        </section>
+
+        <!-- ========== 支撑数据：画像摘要 + 最近匹配（紧凑，ready 时显示） ========== -->
+        <section v-if="profileState === 'ready'" class="support">
+          <div class="sup-card">
+            <p class="sup-eyebrow">个人画像</p>
+            <div class="sup-stats">
+              <span class="tnum"><b>{{ workCount }}</b> 工作</span>
+              <span class="dot">·</span>
+              <span class="tnum"><b>{{ skillCount }}</b> 技能</span>
+              <span class="dot">·</span>
+              <span class="tnum"><b>{{ eduCount }}</b> 教育</span>
+            </div>
+            <button class="sup-link" type="button" @click="go('/profile')">查看 / 完善 →</button>
+          </div>
+
+          <div class="sup-card">
+            <p class="sup-eyebrow">最近匹配</p>
+            <div v-if="recentMatches.length > 0" class="sup-matches">
+              <span
+                v-for="m in recentMatches.slice(0, 3)"
+                :key="m.id"
+                class="sup-match tnum"
+                :style="{ color: scoreColor(m.overall_score) }"
+                @click="go('/jd-matcher')"
+              >
                 {{ m.overall_score ?? '-' }}
               </span>
-              <span class="m-pos">{{ m.position_title || '未知岗位' }}</span>
-              <span class="m-time tnum">{{ formatTime(m.created_at) }}</span>
             </div>
-          </div>
-          <div v-else class="match-empty">
-            <p>还没有匹配记录</p>
-            <button class="btn-primary sm" type="button" @click="go('/jd-matcher')">去匹配岗位</button>
+            <p v-else class="sup-empty">还没有匹配记录</p>
+            <button class="sup-link" type="button" @click="go('/jd-matcher')">查看全部 →</button>
           </div>
         </section>
-      </div>
-
-      <!-- 下一步链路（加载中/空状态时不显示，避免与 CTA 重复） -->
-      <section v-if="profileState === 'ready' || profileState === 'error'" class="flow-wrap">
-        <p class="section-label">下一步</p>
-        <div class="flow">
-          <div
-            v-for="step in steps"
-            :key="step.id"
-            class="flow-item"
-            :class="{ 'is-open': step.open, 'is-soon': !step.open }"
-            @click="step.open && go(step.to)"
-          >
-            <div class="flow-no tnum">{{ step.no }}</div>
-            <div class="flow-body">
-              <h3>{{ step.title }}</h3>
-              <p>{{ step.desc }}</p>
-            </div>
-            <div class="flow-cta">
-              <span v-if="step.open" class="cta-open">进入 →</span>
-              <span v-else class="cta-soon">即将开放</span>
-            </div>
-          </div>
-        </div>
-      </section>
+      </template>
     </main>
   </div>
 </template>
@@ -123,7 +107,7 @@ const profileState = ref<'loading' | 'ready' | 'empty' | 'error'>('loading')
 const profileError = ref('')
 const profile = ref<any>(null)
 
-// 最近匹配（最多 5 条）
+// 最近匹配（最多取前几条做展示）
 const recentMatches = ref<any[]>([])
 
 // 真实计数（用户拍板：不算完成度，只显真实条数）
@@ -138,13 +122,71 @@ const skillCount = computed(() => {
   )
 })
 
-// 求职四步链路：01/02 已实现，03/04 灰显（编号是真实求职顺序，故保留）
-const steps = [
-  { id: 1, no: '01', title: '建立画像', desc: '上传简历或粘贴文本，AI 自动提取你的个人画像。', open: true, to: '/resume-parser' },
-  { id: 2, no: '02', title: 'JD 匹配', desc: '粘贴目标岗位，AI 解析要求并给出匹配度与差距清单。', open: true, to: '/jd-matcher' },
-  { id: 3, no: '03', title: '简历优化', desc: '基于目标 JD，AI 定向优化简历的表达与亮点。', open: true, to: '/resume-optimizer' },
-  { id: 4, no: '04', title: '模拟面试', desc: 'AI 扮演面试官，真实场景练习并复盘。', open: true, to: '/interview/setup' }
-]
+// ===== 链路条 signature 的核心：四阶段 + 真实进度状态 =====
+// status 三态：done(已完成·墨蓝实心) / active(当前·琥珀高亮) / todo(未达·灰虚线)
+type StageStatus = 'done' | 'active' | 'todo'
+type StageKey = 'profile' | 'match' | 'resume' | 'interview'
+
+const stages = computed(() => {
+  const hasProfile = profileState.value === 'ready' && !!profile.value
+  const hasMatch = recentMatches.value.length > 0
+  // NOTE: 简历优化 / 模拟面试 的历史 Home 暂未拉取，先以 todo 呈现；
+  //       方向验证后推广时接入对应历史接口，让进度判定完整准确。
+  const list: { no: string; key: StageKey; name: string; to: string; status: StageStatus; meta: string }[] = [
+    {
+      no: '01', key: 'profile', name: '建立画像', to: '/resume-parser',
+      status: hasProfile ? 'done' : 'active',
+      meta: hasProfile ? `${workCount.value}段经历` : '从这里开始',
+    },
+    {
+      no: '02', key: 'match', name: 'JD 匹配', to: '/jd-matcher',
+      status: hasMatch ? 'done' : (hasProfile ? 'active' : 'todo'),
+      meta: hasMatch ? `最近 ${recentMatches.value[0]?.overall_score ?? '-'} 分` : (hasProfile ? '建议下一步' : '待解锁'),
+    },
+    { no: '03', key: 'resume', name: '简历优化', to: '/resume-optimizer', status: 'todo', meta: '待开始' },
+    { no: '04', key: 'interview', name: '模拟面试', to: '/interview/setup', status: 'todo', meta: '待开始' },
+  ]
+  return list
+})
+
+// 当前阶段：优先 active，否则最后一个 done，否则第一站
+const currentStage = computed(() => {
+  const active = stages.value.find((s) => s.status === 'active')
+  if (active) return active
+  const done = [...stages.value].reverse().find((s) => s.status === 'done')
+  return done ?? stages.value[0]
+})
+
+// HERO 论点：随当前阶段动态变化（让首屏说一句"有用的话"，而非标签）
+const thesis = computed(() => {
+  if (profileState.value === 'empty') return '先建立画像，AI 才能陪你走完求职全链路。'
+  if (profileState.value === 'error') return '先把画像读出来，继续你的求职进度。'
+  const stage = currentStage.value
+  if (!stage) return '这是你的求职作战看板。'
+  const map: Record<StageKey, string> = {
+    profile: '画像还没建好，从这里开始你的求职链路。',
+    match: '画像已成，下一站：匹配你的目标岗位。',
+    resume: '目标已锁定，下一站：定向优化简历。',
+    interview: '简历就绪，下一站：模拟面试实战演练。',
+  }
+  return map[stage.key] ?? '这是你的求职作战看板。'
+})
+
+// 下一步焦点卡：标题 / 描述 / CTA 文案，都随当前阶段
+const nextStep = computed(() => {
+  const s = currentStage.value
+  if (!s) return { title: '', desc: '', cta: '', to: '/profile' }
+  const cta: Record<StageKey, string> = {
+    profile: '开始建立画像', match: '去匹配岗位', resume: '去优化简历', interview: '开始模拟面试',
+  }
+  const desc: Record<StageKey, string> = {
+    profile: '上传简历或粘贴文本，AI 自动提取你的个人画像。',
+    match: '粘贴目标岗位 JD，看匹配度与差距清单。',
+    resume: '基于目标 JD，AI 定向优化简历的表达与亮点。',
+    interview: 'AI 面试官真实场景演练，结束即复盘。',
+  }
+  return { title: s.name, desc: desc[s.key], cta: cta[s.key], to: s.to }
+})
 
 /** 进入路由 */
 function go(to: string): void {
@@ -189,15 +231,9 @@ async function loadMatches(): Promise<void> {
 
 /** 匹配度配色（对齐 token：$success / $warning / $error） */
 function scoreColor(s?: number): string {
-  if ((s ?? 0) >= 75) return '#10b981' // $success
-  if ((s ?? 0) >= 50) return '#d97706' // $warning
-  return '#ef4444'                      // $error
-}
-
-/** 时间格式化（复用 JdMatcher 同款） */
-function formatTime(t?: string | null): string {
-  if (!t) return ''
-  return t.replace('T', ' ').slice(0, 16)
+  if ((s ?? 0) >= 75) return '#10b981'
+  if ((s ?? 0) >= 50) return '#d97706'
+  return '#ef4444'
 }
 
 onMounted(() => {
@@ -208,39 +244,309 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .home {
-  min-height: 100vh;
+  // 顶栏 AppTopBar 是 sticky、占文档流 65px（64 高 + 1 边框）。
+  // 若这里仍写 min-height:100vh，总高 = 65 + 100vh ＞ 视口 → 底部空背景 + 能滚动。
+  // 减去顶栏高度，内容少时刚好铺满、不多出；内容多时自然滚动。
+  min-height: calc(100vh - 65px);
   background: $bg-light;
 }
 
 .main {
   max-width: 1040px;
   margin: 0 auto;
-  padding: $spacing-3xl $spacing-xl;
+  padding: $spacing-3xl $spacing-xl $spacing-2xl;
 }
 
-/* 欢迎区 */
-.welcome {
+/* ========== HERO ========== */
+.hero {
   margin-bottom: $spacing-2xl;
 
   .eyebrow {
     font-family: $font-mono;
     font-size: $font-size-xs;
-    letter-spacing: 0.15em;
+    letter-spacing: 0.18em;
     color: $accent-color;
-    margin-bottom: $spacing-sm;
+    margin-bottom: $spacing-md;
   }
 
   h1 {
-    font-size: $font-size-3xl;
+    font-size: $font-size-4xl;       // 宋体巨字，hero 冲击
+    color: $ink;
     margin-bottom: $spacing-sm;
+    letter-spacing: -0.01em;
   }
 
-  .welcome-sub {
+  .hero-thesis {
+    color: $text-secondary;
+    font-size: $font-size-lg;
+    max-width: 46ch;
+  }
+}
+
+/* ========== SIGNATURE：求职链路条 ========== */
+.track {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: $spacing-2xl;
+  padding: $spacing-xl $spacing-md 0;
+}
+
+.track-node {
+  flex: 1;
+  position: relative;
+  text-align: center;
+  cursor: pointer;
+  padding-top: 22px;                 // 给圆点 + 连线留位
+
+  // 连线：本节点左半段（从上一节点中心到本节点中心）
+  &::before {
+    content: '';
+    position: absolute;
+    top: 9px;                        // 圆点垂直中心
+    right: 50%;
+    width: 100%;
+    height: 2px;
+    transform: translateX(0.5px);
+  }
+  &:first-child::before {
+    display: none;                   // 首节点无左线
+  }
+
+  // 三态连线 + 圆点配色
+  &.done::before { background: $ink; }
+  &.active::before { background: $accent-color; }
+  &.todo::before {
+    background: transparent;
+    border-top: 2px dashed $border-color;
+    height: 0;
+    top: 10px;
+  }
+}
+
+.node-dot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  z-index: 1;
+  transition: all $transition-base ease;
+
+  .done & {
+    background: $ink;
+  }
+
+  .active & {
+    background: $accent-color;
+    box-shadow: 0 0 0 5px rgba($accent-color, 0.18);   // 琥珀光环
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+
+  .todo & {
+    background: $bg-white;
+    border: 2px solid $border-color;
+  }
+
+  // hover：节点轻微放大，提示可点
+  .track-node:hover & {
+    transform: translateX(-50%) scale(1.18);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 5px rgba($accent-color, 0.18); }
+  50% { box-shadow: 0 0 0 9px rgba($accent-color, 0.08); }
+}
+
+// 尊重「减少动态」偏好
+@media (prefers-reduced-motion: reduce) {
+  .node-dot .active &,
+  .active .node-dot { animation: none; }
+}
+
+.node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 $spacing-xs;
+
+  .node-no {
+    font-family: $font-mono;
+    font-size: $font-size-xs;
+    color: $text-disabled;
+    letter-spacing: 0.08em;
+  }
+
+  .node-name {
+    font-family: $font-heading;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    color: $ink;
+  }
+
+  .node-meta {
+    font-family: $font-mono;
+    font-size: $font-size-xs;
+    color: $text-secondary;
+  }
+
+  .todo & .node-name { color: $text-disabled; }
+  .active & .node-name { color: $accent-color; }
+}
+
+/* ========== 下一步焦点 ========== */
+.next {
+  margin-bottom: $spacing-2xl;
+}
+
+.section-label {
+  font-family: $font-mono;
+  font-size: $font-size-xs;
+  letter-spacing: 0.14em;
+  color: $text-secondary;
+  margin-bottom: $spacing-md;
+}
+
+.next-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-lg;
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-left: 3px solid $accent-color;    // 琥珀焦点条
+  border-radius: $radius-lg;
+  padding: $spacing-lg $spacing-xl;
+  cursor: pointer;
+  transition: all $transition-base ease;
+
+  &:hover {
+    border-left-color: $accent-light;
+    box-shadow: $shadow-md;
+    transform: translateX(2px);
+  }
+}
+
+.next-body {
+  h3 {
+    font-size: $font-size-lg;
+    color: $ink;
+    margin-bottom: $spacing-xs;
+  }
+
+  p {
+    font-size: $font-size-sm;
     color: $text-secondary;
   }
 }
 
-/* 状态块（加载 / 错误） */
+.next-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  background: $primary-color;
+  color: #fff;
+  border: none;
+  padding: $spacing-sm $spacing-lg;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background $transition-base ease;
+
+  .arrow {
+    transition: transform $transition-base ease;
+  }
+
+  .next-card:hover & {
+    background: $primary-dark;
+
+    .arrow {
+      transform: translateX(3px);
+    }
+  }
+}
+
+/* ========== 支撑数据（紧凑横排） ========== */
+.support {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-lg;
+}
+
+.sup-card {
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-radius: $radius-lg;
+  padding: $spacing-lg $spacing-xl;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.sup-eyebrow {
+  font-family: $font-mono;
+  font-size: $font-size-xs;
+  letter-spacing: 0.12em;
+  color: $text-secondary;
+}
+
+.sup-stats {
+  display: flex;
+  align-items: baseline;
+  gap: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+
+  b {
+    font-family: $font-heading;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-bold;
+    color: $ink;
+    margin-right: 2px;
+  }
+
+  .dot {
+    color: $border-color;
+  }
+}
+
+.sup-matches {
+  display: flex;
+  gap: $spacing-md;
+
+  .sup-match {
+    font-family: $font-heading;
+    font-size: $font-size-xl;
+    font-weight: $font-weight-bold;
+    cursor: pointer;
+  }
+}
+
+.sup-empty {
+  font-size: $font-size-sm;
+  color: $text-disabled;
+}
+
+.sup-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: $primary-color;
+  font-size: $font-size-sm;
+  cursor: pointer;
+  padding: 0;
+  margin-top: $spacing-xs;
+
+  &:hover {
+    color: $primary-dark;
+  }
+}
+
+/* ========== 状态块（加载 / 错误） ========== */
 .state-block {
   display: flex;
   flex-direction: column;
@@ -252,7 +558,6 @@ onMounted(() => {
   border: 1px solid $border-color;
   border-radius: $radius-lg;
   color: $text-secondary;
-  margin-bottom: $spacing-2xl;
 }
 
 .state-title {
@@ -263,7 +568,6 @@ onMounted(() => {
 
 .state-sub {
   font-size: $font-size-sm;
-  color: $text-secondary;
   max-width: 40ch;
 }
 
@@ -278,179 +582,9 @@ onMounted(() => {
 }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
-/* 新用户引导：大 CTA */
-.onboard {
-  padding: $spacing-3xl $spacing-2xl;
-  background: $bg-white;
-  border: 1px solid $border-color;
-  border-left: 3px solid $accent-color;
-  border-radius: $radius-lg;
-  margin-bottom: $spacing-2xl;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: $spacing-md;
-
-  .onboard-eyebrow {
-    font-family: $font-mono;
-    font-size: $font-size-xs;
-    letter-spacing: 0.15em;
-    color: $accent-color;
-  }
-
-  .onboard-title {
-    font-family: $font-heading;
-    font-size: $font-size-2xl;
-    color: $ink;
-    line-height: 1.4;
-    max-width: 36ch;
-  }
-}
-
-.cta {
-  background: $primary-color;
-  color: #fff;
-  border: none;
-  padding: $spacing-md $spacing-2xl;
-  border-radius: $radius-md;
-  cursor: pointer;
-  font-size: $font-size-base;
-  font-weight: $font-weight-semibold;
-  transition: background $transition-base ease;
-
-  &:hover {
-    background: $primary-dark;
-  }
-}
-
-/* 看板：两列 */
-.board {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: $spacing-lg;
-  margin-bottom: $spacing-3xl;
-}
-
-.card {
-  background: $bg-white;
-  border: 1px solid $border-color;
-  border-radius: $radius-lg;
-  padding: $spacing-xl;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: $spacing-lg;
-
-  .card-eyebrow {
-    font-family: $font-mono;
-    font-size: $font-size-xs;
-    letter-spacing: 0.12em;
-    color: $text-secondary;
-  }
-}
-
-.link {
-  background: none;
-  border: none;
-  color: $primary-color;
-  font-size: $font-size-sm;
-  cursor: pointer;
-  padding: 0;
-
-  &:hover {
-    color: $primary-dark;
-  }
-}
-
-/* 画像计数 */
-.stats {
-  display: flex;
-  gap: $spacing-xl;
-}
-
-.stat {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-xs;
-}
-
-.stat-num {
-  font-family: $font-heading;
-  font-size: $font-size-3xl;
-  font-weight: $font-weight-bold;
-  color: $ink;
-  line-height: 1;
-}
-
-.stat-label {
-  font-size: $font-size-xs;
-  color: $text-secondary;
-}
-
-/* 最近匹配列表 */
-.match-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.match-item {
-  display: flex;
-  align-items: center;
-  gap: $spacing-md;
-  padding: $spacing-sm 0;
-  border-bottom: 1px solid $border-light;
-  cursor: pointer;
-  font-size: $font-size-sm;
-
-  &:last-child {
-    border-bottom: none;
-  }
-
-  &:hover .m-pos {
-    color: $primary-color;
-  }
-}
-
-.m-score {
-  font-weight: $font-weight-bold;
-  min-width: 36px;
-  font-size: $font-size-base;
-}
-
-.m-pos {
-  flex: 1;
-  color: $text-primary;
-  transition: color $transition-base ease;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.m-time {
-  color: $text-disabled;
-  font-size: $font-size-xs;
-}
-
-.match-empty {
-  text-align: center;
-  padding: $spacing-lg 0;
-  color: $text-secondary;
-  font-size: $font-size-sm;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: $spacing-md;
-}
-
-/* 按钮 */
 .btn-primary {
   background: $primary-color;
   color: #fff;
@@ -460,122 +594,32 @@ onMounted(() => {
   cursor: pointer;
   font-size: $font-size-sm;
   font-weight: $font-weight-medium;
-  transition: background $transition-base ease;
 
-  &:hover {
-    background: $primary-dark;
-  }
-
-  &.sm {
-    padding: $spacing-xs $spacing-lg;
-  }
+  &:hover { background: $primary-dark; }
 }
 
-/* 下一步链路 */
-.section-label {
-  font-family: $font-mono;
-  font-size: $font-size-xs;
-  letter-spacing: 0.12em;
-  color: $text-secondary;
-  margin-bottom: $spacing-md;
-}
-
-.flow {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-md;
-}
-
-.flow-item {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: $spacing-lg;
-  padding: $spacing-lg $spacing-xl;
-  background: $bg-white;
-  border: 1px solid $border-color;
-  border-left: 3px solid transparent;
-  border-radius: $radius-lg;
-  transition: all $transition-base ease;
-
-  &.is-open {
-    cursor: pointer;
-
-    &:hover {
-      border-left-color: $primary-color;
-      transform: translateX(4px);
-      box-shadow: $shadow-md;
-    }
-  }
-
-  &.is-soon {
-    background: $bg-gray;
-
-    .flow-no {
-      color: $text-disabled;
-    }
-  }
-}
-
-.flow-no {
-  font-family: $font-heading;
-  font-size: $font-size-2xl;
-  font-weight: $font-weight-bold;
-  color: $accent-color;
-  min-width: 44px;
-}
-
-.flow-body {
-  h3 {
-    font-size: $font-size-lg;
-    margin-bottom: $spacing-xs;
-  }
-
-  p {
-    font-size: $font-size-sm;
-    color: $text-secondary;
-  }
-}
-
-.flow-cta {
-  .cta-open {
-    color: $primary-color;
-    font-weight: $font-weight-medium;
-    font-size: $font-size-sm;
-    white-space: nowrap;
-  }
-
-  .cta-soon {
-    color: $text-disabled;
-    font-size: $font-size-xs;
-    border: 1px solid $border-color;
-    padding: 2px 10px;
-    border-radius: $radius-full;
-    white-space: nowrap;
-  }
-}
-
-/* 响应式 */
+/* ========== 响应式 ========== */
 @media (max-width: $container-md) {
   .main {
-    padding: $spacing-2xl $spacing-lg;
+    padding: $spacing-2xl $spacing-lg $spacing-xl;
   }
 
-  .welcome h1 {
-    font-size: $font-size-2xl;
+  .hero h1 {
+    font-size: $font-size-3xl;
   }
 
-  .board {
+  // 窄屏：链路条只留编号 + 名，meta 换行更紧凑
+  .node-meta {
+    font-size: 10px;
+  }
+
+  .next-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .support {
     grid-template-columns: 1fr;
-  }
-
-  .stats {
-    gap: $spacing-lg;
-  }
-
-  .flow-item {
-    padding: $spacing-md;
-    gap: $spacing-md;
   }
 }
 </style>

@@ -279,7 +279,8 @@ class ResumeOptimizeState(TypedDict):
 
     # --- 输入 ---
     target_position: Optional[str]                      # 目标岗位
-    jd_result_id: Optional[str]                         # 关联的 JD 匹配结果 ID（可空）
+    jd_result_id: Optional[str]                         # 关联的 JD 匹配结果 ID（方式 B，可空）
+    jd_text: Optional[str]                              # 目标岗位 JD 原文（方式 A：手写粘贴；可空，作生成上下文）
     gaps_snapshot: Optional[List[Dict[str, Any]]]       # Gap 清单快照（生成中保持一致）
     profile_snapshot: Optional[Dict[str, Any]]          # 画像快照
 
@@ -392,6 +393,7 @@ def create_initial_state(user_id: Optional[str] = None) -> Dict[str, Any]:
         # 简历优化相关
         "target_position": None,
         "jd_result_id": None,
+        "jd_text": None,
         "gaps_snapshot": None,
         "profile_snapshot": None,
         "resume_md": None,

@@ -20,7 +20,7 @@ import re
 import json
 import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from src.graph.config import get_llm
 from src.graph.prompts import get_resume_generation_prompt, get_resume_refine_prompt
@@ -96,6 +96,7 @@ def generate_resume(
     profile: Dict[str, Any],
     gaps: List[Dict[str, Any]],
     target_position: str,
+    jd_text: Optional[str] = None,
     max_retries: int = 2,
 ) -> str:
     """
@@ -127,7 +128,7 @@ def generate_resume(
 
     for attempt in range(max_retries + 1):
         try:
-            prompt = get_resume_generation_prompt(profile_text, gaps_text, target_position, has_gaps)
+            prompt = get_resume_generation_prompt(profile_text, gaps_text, target_position, has_gaps, jd_text)
             if attempt > 0:
                 prompt = (
                     "上次生成失败。请直接输出 Markdown 简历全文，"

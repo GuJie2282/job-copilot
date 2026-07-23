@@ -38,7 +38,6 @@ from src.graph.nodes.jd_match import (
     jd_parsing_node,
     profile_load_node,
     match_calc_node,
-    gap_analysis_node,
     report_format_node,
     route_after_intake,
     route_after_quality,
@@ -108,7 +107,6 @@ def create_graph() -> StateGraph:
     builder.add_node("jd_parsing", jd_parsing_node)
     builder.add_node("profile_load", profile_load_node)
     builder.add_node("match_calc", match_calc_node)
-    builder.add_node("gap_analysis", gap_analysis_node)
     builder.add_node("report_format", report_format_node)
 
     # 简历优化流程节点（区块三：路径 A 自动生成）
@@ -198,9 +196,8 @@ def create_graph() -> StateGraph:
     )
     builder.add_conditional_edges(
         "match_calc", route_after_match,
-        {"gap": "gap_analysis", "end": END}
+        {"report": "report_format", "end": END}
     )
-    builder.add_edge("gap_analysis", "report_format")
     builder.add_edge("report_format", END)
 
     # 简历优化流程（路径 A：条件边串联，评估/校验失败回 generate 重试，达上限带过）

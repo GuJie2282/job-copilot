@@ -21,6 +21,7 @@ from src.graph.config import get_llm
 from src.graph.prompts import get_gap_suggestion_prompt
 from src.services.jd_parser import _extract_json
 from src.services.llm_retry import is_retryable
+from src.services.matcher import judge_implicit  # 增补链复用隐性偏好 LLM 判断
 
 logger = logging.getLogger(__name__)
 
@@ -92,51 +93,100 @@ def _generate_suggestions(gaps: List[Dict], user_profile: Dict, max_retries: int
     return [_template_suggestion(g["type"]) for g in gaps]
 
 
-def analyze_gaps(
+def _sort_by_severity(gaps: List[Dict]) -> None:
+    """按严重度降序排列（critical → low），原地修改。"""
+    gaps.sort(
+        key=lambda g: SEVERITY_ORDER.index(g["severity"]) if g.get("severity") in SEVERITY_ORDER else 99
+    )
+
+
+def build_gap_skeleton(
     job_profile: Dict[str, Any],
-    user_profile: Dict[str, Any],
     match_result: Dict[str, Any],
-    max_retries: int = 2,
 ) -> List[Dict[str, Any]]:
     """
-    基于匹配结果生成 Gap 清单。
+    生成 Gap 骨架（评分链用，纯规则、无 LLM、毫秒级）。
 
-    Args:
-        job_profile:  JD 要求画像
-        user_profile: 用户画像
-        match_result: matcher 的输出（含 matched_items）
-    Returns:
-        gaps list，每项含：
-          type / requirement / current_state / suggestion / severity / status / need_confirm
-        按严重度降序排列（critical → low）。
+    - 硬技能/软技能/红线 Gap：来自 match_result.matched_items 中 missing/partial 的项
+      （经验/学历差距已由 dimension_scores 体现，不重复进 Gap）。
+    - 隐性偏好 Gap：以"分析中"占位（状态/建议待增补链 enrich 回填）。
+    - 每条先给模板建议（suggestion），enrich 时再用 LLM 覆盖。
+
+    供主请求 SSE done 事件下发 + 落库；enrich 端点在此基础上回填。
     """
     items = match_result.get("matched_items", [])
     base_gaps: List[Dict] = []
-    # 只提取四分类（硬技能/软技能/隐性/红线）的差距；
-    # 经验/学历维度的差距已通过 dimension_scores 体现，不重复进 Gap 清单。
     for it in items:
-        if it.get("category") in ("hard_skill", "soft_skill", "implicit", "redline") \
+        if it.get("category") in ("hard_skill", "soft_skill", "redline") \
                 and it.get("status") in ("missing", "partial"):
+            gtype = it.get("category") or ""
             base_gaps.append({
-                "type": it.get("category"),
+                "type": gtype,
                 "requirement": it.get("requirement"),
                 "current_state": it.get("profile_evidence") or "画像中未体现",
                 "status": it.get("status"),
                 "need_confirm": it.get("need_confirm", False),
-                "severity": _severity_for(it.get("category", "")),
+                "severity": _severity_for(gtype),
+                "suggestion": _template_suggestion(gtype),
             })
 
-    if not base_gaps:
-        return []
+    # 隐性偏好占位（状态未知 → "分析中"，待 enrich 的 judge_implicit 回填）
+    for pref in (job_profile.get("implicit_preferences") or []):
+        base_gaps.append({
+            "type": "implicit",
+            "requirement": pref.get("requirement"),
+            "current_state": "分析中…",
+            "status": "分析中",
+            "need_confirm": False,
+            "severity": _severity_for("implicit"),
+            "suggestion": None,
+        })
 
-    # LLM 生成建议（失败降级模板）
-    suggestions = _generate_suggestions(base_gaps, user_profile, max_retries)
-    for g, s in zip(base_gaps, suggestions):
+    _sort_by_severity(base_gaps)
+    return base_gaps
+
+
+def enrich_gaps(
+    gaps: List[Dict[str, Any]],
+    job_profile: Dict[str, Any],
+    user_profile: Dict[str, Any],
+    max_retries: int = 2,
+) -> List[Dict[str, Any]]:
+    """
+    增补链：用 LLM 回填 Gap 的隐性判断结果与应对建议（enrich 端点调用）。
+
+    1. judge_implicit 给隐性偏好定状态 + 理由；满足的隐性项不再是 Gap → 移除。
+    2. _generate_suggestions 为所有剩余 Gap 生成 LLM 建议（失败降级模板）。
+
+    与原 analyze_gaps 语义一致，但拆出来让评分链不必等这两段 LLM。
+    注：两段 LLM 顺序执行（建议需覆盖判为差距的隐性项）；并行优化留作后续。
+    """
+    # 1. 隐性偏好判断（LLM）
+    implicit_prefs = job_profile.get("implicit_preferences") or []
+    judged = judge_implicit(implicit_prefs, user_profile, max_retries) if implicit_prefs else []
+    judged_map = {}
+    for j in judged:
+        if isinstance(j, dict):
+            judged_map[j.get("requirement")] = j
+
+    # 回填隐性 Gap 状态；满足的移除（不再是差距）
+    enriched: List[Dict] = []
+    for g in gaps:
+        if g.get("type") == "implicit":
+            j = judged_map.get(g.get("requirement"))
+            status = j.get("status") if isinstance(j, dict) else "partial"
+            if status not in ("satisfied", "partial", "missing"):
+                status = "partial"
+            if status == "satisfied":
+                continue  # 满足 → 不是 Gap，跳过
+            reason = (j.get("profile_evidence") if isinstance(j, dict) else None) or "画像中未明确体现"
+            g = {**g, "status": status, "current_state": reason}
+        enriched.append(g)
+
+    # 2. 建议生成（LLM，失败降级模板）
+    suggestions = _generate_suggestions(enriched, user_profile, max_retries)
+    for g, s in zip(enriched, suggestions):
         g["suggestion"] = s
 
-    # 按严重度降序排列
-    base_gaps.sort(
-        key=lambda g: SEVERITY_ORDER.index(g["severity"]) if g["severity"] in SEVERITY_ORDER else 99
-    )
-
-    return base_gaps
+    _sort_by_severity(enriched)
+    return enriched

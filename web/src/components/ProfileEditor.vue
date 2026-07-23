@@ -126,6 +126,61 @@
         </button>
       </section>
 
+      <!-- 个人总结 -->
+      <section class="section">
+        <h4>个人总结</h4>
+        <div class="skill-group">
+          <textarea
+            v-model="editedProfile.self_summary"
+            placeholder="例如：3 年互联网产品经验，擅长从 0 到 1 搭建产品…"
+            rows="3"
+          ></textarea>
+        </div>
+      </section>
+
+      <!-- 项目经验 -->
+      <section class="section">
+        <h4>项目经验</h4>
+        <div
+          v-for="(_, index) in projectList"
+          :key="index"
+          class="work-item"
+        >
+          <div class="item-header">
+            <span class="item-number">项目经历 {{ index + 1 }}</span>
+            <button
+              v-if="projectList.length > 1"
+              @click="removeProject(index)"
+              class="remove-btn"
+              type="button"
+            >
+              删除
+            </button>
+          </div>
+          <div class="form-grid">
+            <FormField
+              label="项目名称"
+              v-model="editedProfile.project_names[index]"
+            />
+            <FormField
+              label="担任角色"
+              v-model="editedProfile.project_roles[index]"
+            />
+          </div>
+          <div class="work-description-field">
+            <label>项目详情（保留原文细节）</label>
+            <textarea
+              v-model="editedProfile.project_descriptions[index]"
+              placeholder="例如：项目背景、你的职责、核心成果数据…"
+              rows="3"
+            ></textarea>
+          </div>
+        </div>
+        <button @click="addProject" class="add-btn" type="button">
+          + 添加项目经历
+        </button>
+      </section>
+
       <!-- 技能 -->
       <section class="section">
         <h4>技能</h4>
@@ -192,11 +247,23 @@ const editedProfile = ref<any>(
 // 避免 v-model 绑定 work_descriptions[index] 时下标越界（后端可能没返回该字段或长度不一致）
 ;(() => {
   const p = editedProfile.value
+  // 规整工作详情数组：与 companies 等长，避免 v-model 绑 work_descriptions[index] 越界
   if (Array.isArray(p.companies)) {
     if (!Array.isArray(p.work_descriptions)) p.work_descriptions = []
     while (p.work_descriptions.length < p.companies.length) p.work_descriptions.push('')
     p.work_descriptions.length = p.companies.length
   }
+  // 规整项目数组：project_roles / project_descriptions 与 project_names 等长
+  if (Array.isArray(p.project_names)) {
+    if (!Array.isArray(p.project_roles)) p.project_roles = []
+    if (!Array.isArray(p.project_descriptions)) p.project_descriptions = []
+    while (p.project_roles.length < p.project_names.length) p.project_roles.push('')
+    while (p.project_descriptions.length < p.project_names.length) p.project_descriptions.push('')
+    p.project_roles.length = p.project_names.length
+    p.project_descriptions.length = p.project_names.length
+  }
+  // 个人总结兜底为字符串（避免 textarea v-model 绑 undefined 报错）
+  if (p.self_summary == null) p.self_summary = ''
 })()
 
 // 技能列表转换
@@ -257,6 +324,12 @@ const workList = computed(() => {
   }))
 })
 
+// 项目列表（只需迭代次数，v-model 直接绑 editedProfile 的并行数组）
+const projectList = computed(() => {
+  const count = editedProfile.value.project_names?.length || 0
+  return Array.from({ length: count }, (_, i) => i)
+})
+
 const getConfidence = (field: string) => {
   return props.confidence?.[field]
 }
@@ -299,6 +372,23 @@ const removeWork = (index: number) => {
   editedProfile.value.positions?.splice(index, 1)
   editedProfile.value.durations?.splice(index, 1)
   editedProfile.value.work_descriptions?.splice(index, 1)
+}
+
+const addProject = () => {
+  if (!editedProfile.value.project_names) {
+    editedProfile.value.project_names = []
+    editedProfile.value.project_roles = []
+    editedProfile.value.project_descriptions = []
+  }
+  editedProfile.value.project_names.push('')
+  editedProfile.value.project_roles.push('')
+  editedProfile.value.project_descriptions.push('')
+}
+
+const removeProject = (index: number) => {
+  editedProfile.value.project_names?.splice(index, 1)
+  editedProfile.value.project_roles?.splice(index, 1)
+  editedProfile.value.project_descriptions?.splice(index, 1)
 }
 
 const onSave = () => {

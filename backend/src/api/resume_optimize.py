@@ -37,9 +37,10 @@ resume_optimize_router = APIRouter()
 class GenerateRequest(BaseModel):
     """简历生成请求"""
     target_position: str = Field(..., description="目标岗位", min_length=1)
-    jd_result_id: Optional[str] = Field(None, description="关联的 JD 匹配结果 ID（用于读取 Gap；可选）")
+    jd_result_id: Optional[str] = Field(None, description="方式 B：关联的 JD 匹配结果 ID（读取其 Gap）")
+    jd_text: Optional[str] = Field(None, description="方式 A：目标岗位 JD 原文（粘贴；可选，作生成上下文）")
     gaps: Optional[List[Dict[str, Any]]] = Field(
-        None, description="可直接传入 Gap 清单（优先于 jd_result_id；都无则通用生成）"
+        None, description="可直接传入 Gap 清单（优先于 jd_result_id/jd_text；都无则通用生成）"
     )
     user_id: Optional[str] = Field(None, description="用户 ID")
 
@@ -75,6 +76,8 @@ async def generate_resume_api(request: GenerateRequest):
         state["target_position"] = request.target_position
         if request.jd_result_id:
             state["jd_result_id"] = request.jd_result_id
+        if request.jd_text:
+            state["jd_text"] = request.jd_text
         if request.gaps:
             state["gaps_snapshot"] = request.gaps  # 直接传入优先
 

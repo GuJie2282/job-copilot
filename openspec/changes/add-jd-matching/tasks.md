@@ -2,7 +2,7 @@
 
 ## 任务概览
 
-本变更分两大区块：**区块一（前置：画像持久化）** 与 **区块二（核心：JD 匹配）**，外加前端与测试。
+本变更分两大区块：**区块一（前置：画像持久化）** 与 **区块二（核心：JD 匹配）**，外加前端与测试；另含 **区块三（流式化与 Gap 增补 lazy 改造，对应 design 决策 9/11）**——因原同步方案实测超时而追加。
 
 **预计工时**：约 11 天
 
@@ -149,8 +149,48 @@
 - [ ] 6.2.3 红线场景：学历/资质不满足时的惩罚与预警是否正确
 
 #### 6.3 性能与集成
-- [ ] 6.3.1 端到端耗时（目标 < 30 秒）；超时降级
+- [ ] 6.3.1 端到端验证：评分链 < 30 秒且分数优先可见；流式连接不触发客户端超时（见区块三 Phase 7/8）
 - [ ] 6.3.2 闭环验证：JD 匹配 Gap 结构能否被（占位的）简历优化模块消费
+
+---
+
+## 区块三：流式化与 Gap 增补 lazy 改造（对应 design 决策 9/11）
+
+> 缘起：原同步 match 端点串行 3 次 strong 档 LLM，偶发慢/限流即冲破前端 90s 超时；叠加 async 端点内同步 invoke 阻塞事件循环。改为阶段级 SSE 流式 + 评分链/增补链拆分。
+
+### Phase 7: 后端流式与评分链/增补链拆分
+
+#### 7.1 拆分匹配图
+- [x] 7.1.1 将 gap_analysis（隐性判断 + Gap 建议 LLM）从主图剥离到增补链
+- [x] 7.1.2 主图收敛为评分链：jd_intake → quality → parsing → profile_load → match_calc → persist
+- [x] 7.1.3 校验 overall 仅由规则维度（技能/经验/学历/软技能）+ 红线惩罚得出，不依赖 judge_implicit
+
+#### 7.2 持久化前移
+- [x] 7.2.1 match_calc 之后立即写库（分数 + 规则 Gap 骨架 + job_profile），生成 result_id
+- [x] 7.2.2 规则 Gap 骨架生成（无 LLM 建议；隐性 Gap 占位"分析中"）
+- [x] 7.2.3 report_format 职责调整为"持久化 + 组装报告骨架"，不再生成 LLM 建议
+
+#### 7.3 SSE 流式 match 端点
+- [x] 7.3.1 POST /api/jd/match 改为 async + `graph.astream(stream_mode="updates")`，返回 `StreamingResponse`（text/event-stream）
+- [x] 7.3.2 节点完成映射为 SSE 事件：`event:stage`（进度）/ `event:score`（分数+result_id）/ `event:done`（骨架）/ `event:error`
+- [ ] 7.3.3 验证：评分链进行中，其他请求（如 history）不被阻塞（事件循环未阻塞）
+
+#### 7.4 Gap 增补端点（lazy）
+- [x] 7.4.1 新增 `POST /api/jd/{id}/enrich`（async）：跑 judge_implicit + Gap 建议（顺序执行——建议需覆盖判为差距的隐性项，并行优化留作后续），via `asyncio.to_thread` 不阻塞事件循环
+- [x] 7.4.2 结果 UPDATE 同一 `jd_match_results` 行（回填 gaps_json）
+- [x] 7.4.3 失败降级：增补 LLM 失败 → 模板建议/隐性 partial，不影响已持久化分数
+
+### Phase 8: 前端流式消费与两段状态
+
+#### 8.1 SSE 流式读取
+- [x] 8.1.1 `web/src/api/jd.ts`：matchJd 改为原生 `fetch` + `ReadableStream` 手写 SSE 解析（POST 友好，不用 EventSource）
+- [x] 8.1.2 `event:stage` → 真实进度文案；`event:score` → 立即渲染总分/四维度（取代 JdMatcher.vue 的假进度定时器）
+- [x] 8.1.3 `event:error` → 友好提示；`event:done` → 拿到 result_id + Gap 骨架
+
+#### 8.2 骨架 + 增补回填
+- [x] 8.2.1 主链 done 后渲染规则 Gap 骨架（隐性 Gap 显示"分析中…"占位）
+- [x] 8.2.2 以 result_id 调 enrich（该请求超时放宽至 ~60s），回填后 Gap 卡片更新建议与隐性状态
+- [x] 8.2.3 enrich 失败时保留骨架 + 模板建议，不阻断展示
 
 ---
 
@@ -208,6 +248,7 @@ Phase 1 (数据层) → Phase 2 (画像存取) ──┐
 | 3.2.5 权重设计 | 总分失真 | 权重可配置，样本校准 |
 | 4.4.5 LLM 重试降级 | 重试仍失败 | 保留 JD + 友好提示 |
 | 5.3.2 雷达图 | 图表库集成 | 复用项目已有图表方案或选轻量库 |
+| 7.3/8.1 SSE 流式 | 首个流式先例、POST+SSE 需手写解析 | fetch+ReadableStream 阶段事件映射；astream 解事件循环阻塞 |
 
 ---
 
@@ -218,6 +259,8 @@ Phase 1 (数据层) → Phase 2 (画像存取) ──┐
 - [ ] JD 匹配全流程跑通（区块二）
 - [ ] 前端报告完整展示
 - [ ] 历史匹配可回看
+- [x] match 端点 SSE 流式输出，分数优先可见、不超时（区块三）
+- [x] enrich 端点 lazy 回填 Gap 建议与隐性判断（区块三）
 
 ### 质量标准
 - [ ] JD 四分类合理（多样本验证）
@@ -232,5 +275,4 @@ Phase 1 (数据层) → Phase 2 (画像存取) ──┐
 - [ ] 向量语义匹配增强（P2）
 - [ ] 匹配结果横向对比（多 JD 同屏对比）
 - [ ] 按 Gap 类型统计用户短板画像
-- [ ] 异步/SSE 流式输出
 - [ ] JD 自动抓取与岗位推荐

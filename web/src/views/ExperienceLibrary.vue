@@ -6,6 +6,20 @@
       <p class="sub">个人面经（你的私有沉淀）+ 公司面经（全局真题）。越练越懂你，竞品抄不走。<router-link to="/interview/history" class="btn-text">面试历史 →</router-link></p>
     </header>
 
+    <!-- SIGNATURE：面经总览（个人+公司 汇总 + 题型分布 + 个人均分） -->
+    <section v-if="personalCount + companyCount > 0" class="lib-summary">
+      <div class="ls-counts">
+        <span class="ls-count"><b class="tnum">{{ personalCount }}</b> 个人面经</span>
+        <span class="ls-count"><b class="tnum">{{ companyCount }}</b> 公司真题</span>
+        <span v-if="personalAvg != null" class="ls-avg">个人均分 <b class="tnum" :style="{ color: colorFor(personalAvg) }">{{ personalAvg }}</b></span>
+      </div>
+      <div v-if="categoryDist.length" class="ls-cats">
+        <span v-for="c in categoryDist" :key="c.key" class="ls-cat">
+          {{ c.label }}<b class="tnum">{{ c.count }}</b>
+        </span>
+      </div>
+    </section>
+
     <!-- Tab 切换 -->
     <div class="tabs">
       <button :class="['tab', { active: tab === 'personal' }]" type="button" @click="switchTab('personal')">个人面经库</button>
@@ -124,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import {
@@ -299,6 +313,26 @@ async function submitUgc() {
   }
 }
 
+// ===== SIGNATURE：面经总览（个人+公司 汇总 + 题型分布 + 个人均分） =====
+const personalCount = computed(() => personal.value.length)
+const companyCount = computed(() => company.value.length)
+const personalAvg = computed(() => {
+  const scored = personal.value.filter((e: any) => e.score != null)
+  if (!scored.length) return null
+  return Math.round(scored.reduce((s: number, e: any) => s + (e.score ?? 0), 0) / scored.length)
+})
+// 题型分布（个人+公司合并计数，只显有数据的题型）
+const categoryDist = computed(() => {
+  const map: Record<string, number> = {}
+  for (const e of [...personal.value, ...company.value] as any[]) {
+    const k = e.category || 'other'
+    map[k] = (map[k] || 0) + 1
+  }
+  return CATEGORIES
+    .map((c) => ({ key: c.key, label: c.label, count: map[c.key] || 0 }))
+    .filter((c) => c.count > 0)
+})
+
 onMounted(() => {
   loadPersonal()
   loadFacets()
@@ -311,6 +345,8 @@ onMounted(() => {
   max-width: 920px;
   margin: 0 auto;
   padding: $spacing-3xl $spacing-xl;
+  // 减顶栏 65px，避免底部空白溢出
+  min-height: calc(100vh - 65px);
 }
 
 .page-head {
@@ -332,6 +368,71 @@ onMounted(() => {
   .sub {
     color: $text-secondary;
     max-width: 60ch;
+  }
+}
+
+/* ===== SIGNATURE：面经总览 ===== */
+.lib-summary {
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-left: 3px solid $accent-color;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-sm;
+  padding: $spacing-lg $spacing-xl;
+  margin-bottom: $spacing-lg;
+}
+
+.ls-counts {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: $spacing-lg;
+  margin-bottom: $spacing-sm;
+
+  .ls-count {
+    font-size: $font-size-sm;
+    color: $text-secondary;
+
+    b {
+      font-family: $font-heading;
+      font-size: $font-size-xl;
+      font-weight: $font-weight-bold;
+      color: $ink;
+      margin-right: 2px;
+    }
+  }
+
+  .ls-avg {
+    margin-left: auto;
+    font-size: $font-size-sm;
+    color: $text-secondary;
+
+    b {
+      font-family: $font-heading;
+      font-size: $font-size-lg;
+      font-weight: $font-weight-bold;
+    }
+  }
+}
+
+.ls-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.ls-cat {
+  padding: 2px $spacing-sm;
+  background: $bg-gray;
+  border-radius: $radius-full;
+  font-size: $font-size-xs;
+  color: $text-secondary;
+
+  b {
+    font-family: $font-mono;
+    color: $ink;
+    font-weight: $font-weight-semibold;
+    margin-left: 4px;
   }
 }
 

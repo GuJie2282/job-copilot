@@ -4,16 +4,16 @@
     <header class="page-head">
       <p class="eyebrow">GENERATE</p>
       <h1>简历优化</h1>
-      <p class="sub">基于你的画像 + 目标岗位差距，从零生成一份定制简历，经 6 维评估与格式校验，导出 A4 PDF。</p>
+      <p class="sub">基于你的画像 + 目标岗位，从零生成一份定制简历，经 6 维评估与格式校验，导出 A4 PDF。</p>
     </header>
 
-    <!-- 画像缺失引导（6.2.4） -->
+    <!-- 画像缺失引导 -->
     <div v-if="profileMissing" class="notice notice-warn">
       <p>尚未建立个人画像，无法生成简历。</p>
       <button class="btn-primary" type="button" @click="goBuildProfile">去建立画像</button>
     </div>
 
-    <!-- 生成输入（6.2.1） -->
+    <!-- 生成输入 -->
     <section class="card">
       <label class="field-label" for="position">目标岗位</label>
       <input
@@ -24,18 +24,62 @@
         :disabled="loading"
       />
 
-      <!-- 关联的 JD 匹配（6.2.2：从 JD 匹配跳转带入） -->
-      <div v-if="jdResultId" class="linked-jd">
-        <span class="link-tag">已关联 JD 匹配</span>
-        <span class="link-hint">将读取该匹配的差距清单（Gap）做针对性生成</span>
+      <!-- 两种方式切换 -->
+      <div class="mode-tabs">
+        <button
+          type="button"
+          class="mode-tab"
+          :class="{ active: mode === 'paste' }"
+          :disabled="loading"
+          @click="mode = 'paste'"
+        >粘贴岗位 JD（可选）</button>
+        <button
+          type="button"
+          class="mode-tab"
+          :class="{ active: mode === 'match' }"
+          :disabled="loading"
+          @click="switchToMatch"
+        >关联 JD 匹配</button>
       </div>
-      <div v-else class="linked-jd hint-no-gap">
-        <span class="link-tag muted">未关联 JD 匹配</span>
-        <span class="link-hint">将生成通用简历。建议先做 <router-link to="/jd-matcher">JD 匹配</router-link> 获得针对性差距</span>
+
+      <!-- 方式 A：粘贴岗位 JD（可选） -->
+      <div v-if="mode === 'paste'" class="mode-panel">
+        <label class="field-label" for="jdtext">岗位 JD（可选，留空则通用生成）</label>
+        <textarea
+          id="jdtext"
+          v-model="jdText"
+          class="jd-textarea"
+          rows="5"
+          :disabled="loading"
+          placeholder="粘贴目标岗位的 JD 原文，生成时会针对它定制；留空则仅基于画像通用生成"
+        />
+        <p class="mode-hint">留空 = 通用简历；填了 = 针对 JD 定制。</p>
+      </div>
+
+      <!-- 方式 B：关联 JD 匹配 -->
+      <div v-else class="mode-panel">
+        <label class="field-label" for="matchsel">选择已有的 JD 匹配</label>
+        <div v-if="jdMatches.length === 0" class="match-empty">
+          还没有匹配记录，去 <router-link to="/jd-matcher">做一次 JD 匹配</router-link> 后再来
+        </div>
+        <select
+          v-else
+          id="matchsel"
+          v-model="selectedMatchId"
+          class="match-select"
+          :disabled="loading"
+          @change="onSelectMatch"
+        >
+          <option :value="''">— 请选择 —</option>
+          <option v-for="m in jdMatches" :key="m.id" :value="m.id">
+            {{ m.position_title || '未知岗位' }} · {{ m.overall_score ?? '-' }} 分 · {{ formatTime(m.created_at) }}
+          </option>
+        </select>
+        <p class="mode-hint">选中后，用该匹配的差距清单（Gap）做针对性生成，并自动填充岗位名。</p>
       </div>
 
       <div class="input-meta">
-        <span class="meta-hint">生成约需 30-60 秒（含评估迭代与导出）</span>
+        <span class="meta-hint">生成约需 2-5 分钟（含评估迭代与导出）</span>
         <button
           class="btn-primary"
           type="button"
@@ -46,7 +90,7 @@
         </button>
       </div>
 
-      <!-- 分阶段进度提示（6.2.3） -->
+      <!-- 分阶段进度 -->
       <div v-if="loading" class="progress">
         <span class="spinner" />
         <p>{{ progressMessage }}</p>
@@ -55,7 +99,6 @@
 
     <!-- 生成结果 -->
     <div v-if="result" class="result">
-      <!-- 评估报告 -->
       <section class="card">
         <h3 class="card-title">
           质量评估<span v-if="result.version" class="title-count tnum">（v{{ result.version }} · draft）</span>
@@ -63,13 +106,11 @@
         <ResumeEvalReport :eval-report="result.eval_report" />
       </section>
 
-      <!-- HTML 预览（6.3.1 复用） -->
       <section class="card">
         <h3 class="card-title">简历预览</h3>
         <ResumePreview :html="result.html" />
       </section>
 
-      <!-- 精修入口（路径 B） -->
       <section v-if="result.refine_offered && result.resume_id" class="card refine-card">
         <div>
           <h3 class="card-title">想再打磨？</h3>
@@ -78,7 +119,6 @@
         <button class="btn-primary" type="button" @click="goRefine(result.resume_id!)">进入精修</button>
       </section>
 
-      <!-- Markdown 原文（可复制） -->
       <section class="card">
         <div class="md-head">
           <h3 class="card-title">Markdown 原文</h3>
@@ -96,6 +136,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { generateResume } from '@/api/resume'
+import { matchHistory } from '@/api/jd'
+import type { MatchHistoryItem } from '@/types/jd'
 import ResumeEvalReport from '@/components/ResumeEvalReport.vue'
 import ResumePreview from '@/components/ResumePreview.vue'
 
@@ -104,7 +146,12 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const targetPosition = ref('')
+const jdText = ref('')
+const mode = ref<'paste' | 'match'>('paste') // 方式 A 粘贴 / 方式 B 关联匹配
+const jdMatches = ref<MatchHistoryItem[]>([])
+const selectedMatchId = ref<string>('')
 const jdResultId = ref<string | undefined>(undefined)
+
 const loading = ref(false)
 const progressMessage = ref('')
 const profileMissing = ref(false)
@@ -113,7 +160,7 @@ let progressTimer: ReturnType<typeof setInterval> | null = null
 
 // 分阶段进度（前端基于时间模拟，后端同步返回）
 function startProgress() {
-  const stages = ['准备画像与差距…', '生成简历草稿…', '6 维评估中…', '迭代改进中…', '装配 HTML…', '即将完成…']
+  const stages = ['准备画像与岗位…', '生成简历草稿…', '6 维评估中…', '迭代改进中…', '装配 HTML…', '即将完成…']
   let i = 0
   progressMessage.value = stages[0] ?? '生成中…'
   progressTimer = setInterval(() => {
@@ -126,6 +173,41 @@ function stopProgress() {
   progressTimer = null
 }
 
+function formatTime(t?: string | null) {
+  if (!t) return ''
+  return t.replace('T', ' ').slice(0, 16)
+}
+
+async function loadMatches() {
+  if (!userStore.userId) return
+  try {
+    const res = await matchHistory(userStore.userId)
+    if (res.status === 'success' && res.data) {
+      jdMatches.value = res.data.items || []
+    }
+  } catch {
+    // 静默失败
+  }
+}
+
+function switchToMatch() {
+  mode.value = 'match'
+  if (jdMatches.value.length === 0) loadMatches()
+}
+
+function onSelectMatch() {
+  if (!selectedMatchId.value) {
+    jdResultId.value = undefined
+    return
+  }
+  jdResultId.value = selectedMatchId.value
+  // 自动填充岗位名（若用户未手写）
+  const m = jdMatches.value.find((x) => x.id === selectedMatchId.value)
+  if (m?.position_title && !targetPosition.value.trim()) {
+    targetPosition.value = m.position_title
+  }
+}
+
 async function onGenerate() {
   if (!targetPosition.value.trim()) {
     ElMessage.warning('请填写目标岗位')
@@ -136,11 +218,23 @@ async function onGenerate() {
   result.value = null
   startProgress()
   try {
-    const res = await generateResume({
+    // 按方式组装请求：方式 B 用 jd_result_id；方式 A 用 jd_text（可选）
+    const payload: {
+      target_position: string
+      user_id?: string
+      jd_result_id?: string
+      jd_text?: string
+    } = {
       target_position: targetPosition.value,
-      jd_result_id: jdResultId.value,
       user_id: userStore.userId,
-    })
+    }
+    if (mode.value === 'match' && jdResultId.value) {
+      payload.jd_result_id = jdResultId.value
+    } else if (mode.value === 'paste' && jdText.value.trim()) {
+      payload.jd_text = jdText.value.trim()
+    }
+
+    const res = await generateResume(payload)
     if (res.status === 'success' && res.data) {
       result.value = res.data
       ElMessage.success('简历生成完成')
@@ -180,9 +274,18 @@ async function copyMd() {
 }
 
 onMounted(() => {
-  // 从 JD 匹配跳转带入：jd_result_id + position（6.2.2）
-  jdResultId.value = (route.query['jd_result_id'] as string) || undefined
-  targetPosition.value = (route.query['position'] as string) || ''
+  // 从 JD 匹配跳转带入：jd_result_id + position → 自动切到「关联匹配」模式
+  const qJd = (route.query['jd_result_id'] as string) || ''
+  const qPos = (route.query['position'] as string) || ''
+  if (qJd) {
+    mode.value = 'match'
+    selectedMatchId.value = qJd
+    jdResultId.value = qJd
+    targetPosition.value = qPos
+    loadMatches()
+  } else {
+    targetPosition.value = qPos
+  }
 })
 </script>
 
@@ -278,34 +381,99 @@ onMounted(() => {
   }
 }
 
-.linked-jd {
-  margin-top: $spacing-sm;
-  font-size: $font-size-xs;
+/* 两种方式切换 */
+.mode-tabs {
   display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  flex-wrap: wrap;
+  gap: $spacing-xs;
+  margin-top: $spacing-md;
+  margin-bottom: $spacing-md;
+  border-bottom: 1px solid $border-light;
+}
 
-  .link-tag {
-    font-family: $font-mono;
-    padding: 2px 8px;
-    border-radius: $radius-sm;
-    background: rgba($success, 0.12);
-    color: $success;
+.mode-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: $spacing-sm $spacing-md;
+  cursor: pointer;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+  transition: all $transition-base ease;
 
-    &.muted {
-      background: $bg-gray;
-      color: $text-secondary;
-    }
-  }
-
-  .link-hint {
-    color: $text-secondary;
-  }
-
-  &.hint-no-gap a {
+  &:hover:not(:disabled) {
     color: $primary-color;
   }
+
+  &.active {
+    color: $primary-color;
+    border-bottom-color: $primary-color;
+    font-weight: $font-weight-medium;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.mode-panel {
+  margin-bottom: $spacing-sm;
+}
+
+.jd-textarea {
+  width: 100%;
+  border: 1px solid $border-color;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+  font-size: $font-size-sm;
+  font-family: $font-body;
+  line-height: $line-height-normal;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color $transition-base ease;
+
+  &:focus {
+    outline: none;
+    border-color: $primary-color;
+    box-shadow: 0 0 0 3px rgba($primary-color, 0.1);
+  }
+
+  &:disabled {
+    background: $bg-gray;
+  }
+}
+
+.match-select {
+  width: 100%;
+  border: 1px solid $border-color;
+  border-radius: $radius-md;
+  padding: $spacing-sm $spacing-md;
+  font-size: $font-size-sm;
+  background: $bg-white;
+  box-sizing: border-box;
+
+  &:focus {
+    outline: none;
+    border-color: $primary-color;
+  }
+}
+
+.match-empty {
+  padding: $spacing-md;
+  background: $bg-gray;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+
+  a {
+    color: $primary-color;
+  }
+}
+
+.mode-hint {
+  margin-top: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $text-disabled;
 }
 
 .input-meta {

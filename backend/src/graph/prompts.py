@@ -546,6 +546,7 @@ def get_resume_generation_prompt(
     gaps_text: str,
     target_position: str,
     has_gaps: bool,
+    jd_text: Optional[str] = None,
 ) -> str:
     """
     获取简历生成 Prompt（画像 + 差距驱动，从零生成定制简历 Markdown）。
@@ -566,6 +567,12 @@ def get_resume_generation_prompt(
         if has_gaps
         else "## 模式\n本次为通用生成（未提供岗位差距）。请基于画像生成一份专业、通用的简历，不针对特定 Gap 定向强化。\n"
     )
+    # 方式 A：用户直接粘贴 JD 原文（未走 JD 匹配），作生成上下文让 LLM 针对性生成
+    jd_section = (
+        f"## 目标岗位 JD（参考原文，针对它定制生成）\n{jd_text}\n"
+        if jd_text
+        else ""
+    )
 
     prompt = f"""你是资深简历顾问。基于候选人画像，针对目标岗位，从零生成一份定制简历（Markdown 格式）。
 
@@ -575,7 +582,7 @@ def get_resume_generation_prompt(
 ## 候选人画像
 {profile_text}
 
-{gap_section}## 简历格式规范（必须严格遵守，格式校验器会查这些硬规则）
+{gap_section}{jd_section}## 简历格式规范（必须严格遵守，格式校验器会查这些硬规则）
 - 首个一级标题必须是 `# self-intro`，下用 `key: value` 放 name / role / phone / email / location 等
 - 教育写一行：`education: 学校 · 专业 · 学历 · 2026届`（必须含毕业届或毕业年份）
 - 每个模块用 `# 模块名`（如 `# 教育背景` / `# 工作经历` / `项目经历` / `技能`）
@@ -900,6 +907,7 @@ def get_evaluation_prompt(
      像真人面试官的口吻，不要机械模板，不要每次都用"关于你刚才的回答"开头；不带引号、不带前缀标签，只写追问这一句本身。
    - 若 miss_signals 为空（回答充分）：填 null。
 6. 客观严谨，不奉承。
+7. **语音识别容错**：回答可能来自语音转写，含同音/近音错字（如「日活」→「日火」、「复购」→「负购」、「站会」→「占会」）或口语化表达与停顿。请结合上下文按**语义**判断信号命中与评分，不要因字面小瑕疵误判——例如「日火提升 15%」应理解为「日活提升」，判为命中「量化结果」类信号。
 
 请输出 JSON：
 """
@@ -958,6 +966,7 @@ def get_debrief_prompt(profile_summary: str, transcript_json: str, target_positi
 4. **next_steps 必须可执行**：如「针对目标岗位，准备 3 个 STAR 故事覆盖『数据驱动决策』方向」。
    **禁止**「加强沟通能力」「提升逻辑思维」式空话。结合目标岗位与候选人弱点。
 5. 客观、建设性，不奉承。
+6. **语音识别容错**：面试记录可能来自语音转写，含同音/近音错字（如「日活」→「日火」、「复购」→「负购」、「漏斗」→「漏豆」）或口语化表达。理解候选人回答时按**语义**还原真实意图，better_version / improvement_point / inappropriate_answers / stuck_points 的判断均基于还原后的语义，不要因字面错字误判「跑题」或「卡壳」。
 
 请输出 JSON：
 """

@@ -12,6 +12,10 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // 允许内网穿透（cpolar 等）的公网域名访问 dev server
+    // Vite 5.2+ 默认只放行 localhost 的 Host 头，公网域名会被 403 拦截
+    // 仅 dev server 生效，不影响 build 后的产物；用 true 表示放开所有 Host（测试用）
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:8001',

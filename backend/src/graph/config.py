@@ -125,6 +125,10 @@ def get_llm(
         api_key=api_key,
         base_url=base_url,
         timeout=timeout,  # LLM 调用超时（默认 60s；答题循环内的评估/追问传更短快速降级，出题/复盘/简历传更长）
+        # 关闭 openai SDK 内置重试！我们的 llm_retry / 各 service 自己的重试循环已全程兜底，
+        # 若再叠加 SDK 的 max_retries=2，单次"超时"会被放大成 3×（SDK 3 次）×（我们的 N 次）≈ 数分钟~9 分钟挂起
+        # （GLM 抖动时实测：parse_jd 卡 7 分钟+ 用户全程"分析中"）。重试权统一归我们的代码。
+        max_retries=0,
     )
 
     return llm

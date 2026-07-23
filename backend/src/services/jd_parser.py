@@ -86,7 +86,9 @@ def parse_jd(jd_text: str, max_retries: int = 2) -> dict:
     if not jd_text or not jd_text.strip():
         raise ValueError("JD 文本为空，无法解析")
 
-    llm = get_llm(temperature=0.0, tier="strong")  # JD 解析：主力档（质量敏感）
+    # timeout 放宽到 90s：glm-4.5 结构化输出（四分类 JSON）在 GLM 负载高时常 >60s，
+    # 60s 易超时；90s 给喘息空间，配合 max_retries=0（见 config）单次失败快速进我们自己的重试。
+    llm = get_llm(temperature=0.0, tier="strong", timeout=90.0)  # JD 解析：主力档（质量敏感）
     last_error = None
 
     for attempt in range(max_retries + 1):
