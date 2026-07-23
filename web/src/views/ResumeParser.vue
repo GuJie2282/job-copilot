@@ -60,6 +60,7 @@
           :confidence="parseResult.confidence"
           @edit="onProfileEdit"
           @save="onSave"
+          @clear="onClear"
         />
 
         <NextStepsCard
@@ -82,7 +83,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 
 // 导入组件
@@ -254,6 +255,36 @@ const onSave = async () => {
   } catch (err: any) {
     ElMessage.warning('保存到服务器失败，请稍后重试')
   }
+}
+
+// 清空画像（由 ProfileDisplay 的"清空画像"触发）—— 二次确认后删除数据库画像并重置页面
+const onClear = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要清空当前画像吗？将同时删除已保存的画像数据，此操作不可撤销。',
+      '清空画像',
+      {
+        confirmButtonText: '确定清空',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return // 用户点了取消
+  }
+
+  try {
+    await resumeApi.deleteProfile(userStore.userId || '')
+    ElMessage.success('画像已清空')
+  } catch (err: any) {
+    ElMessage.warning('删除服务器画像失败，但本地已清空')
+  }
+
+  // 重置到初始状态（回到上传/粘贴入口）
+  parseResult.value = null
+  showProfile.value = false
+  isEditing.value = false
+  error.value = null
 }
 
 // 后续功能导航（由 NextStepsCard 触发）

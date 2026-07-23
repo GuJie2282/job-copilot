@@ -153,7 +153,7 @@ const avgScore = computed(() => {
 const trend = computed(() => {
   const arr = points.value
   if (arr.length < 2) return ''
-  const d = (arr[arr.length - 1].score ?? 0) - (arr[0].score ?? 0)
+  const d = ((arr[arr.length - 1]?.score) ?? 0) - ((arr[0]?.score) ?? 0)
   if (d > 2) return '↗ 上升'
   if (d < -2) return '↘ 下降'
   return '→ 平稳'

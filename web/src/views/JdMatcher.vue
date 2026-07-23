@@ -167,7 +167,7 @@ const headSub = computed(() => {
     .filter((d) => d.score != null)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
   if (ranked.length === 0) return `匹配度 ${r.overall_score ?? '-'}（${r.level || '—'}）。`
-  const top = ranked[0]
+  const top = ranked[0]!
   const weak = ranked[ranked.length - 1]
   if (top.score === weak?.score) {
     return `匹配度 ${r.overall_score ?? '-'}（${r.level || '—'}）· 各维度均衡（${top.score}）。`

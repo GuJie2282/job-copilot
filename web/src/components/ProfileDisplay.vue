@@ -161,6 +161,9 @@
       <button class="save-btn" @click="onSave" type="button">
         保存画像
       </button>
+      <button class="clear-btn" @click="onClear" type="button">
+        清空画像
+      </button>
     </div>
   </div>
 </template>
@@ -178,6 +181,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'edit', profile: any): void
   (e: 'save'): void
+  (e: 'clear'): void
 }>()
 
 const educationList = computed(() => {
@@ -249,6 +253,10 @@ const onEdit = () => {
 
 const onSave = () => {
   emit('save')
+}
+
+const onClear = () => {
+  emit('clear')
 }
 </script>
 
@@ -431,5 +439,15 @@ const onSave = () => {
 .save-btn:hover {
   background: $success;
   opacity: 0.9;
+}
+
+.clear-btn {
+  background: rgba($error, 0.1);
+  color: $error;
+}
+
+.clear-btn:hover {
+  background: $error;
+  color: white;
 }
 </style>

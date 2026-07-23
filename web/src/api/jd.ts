@@ -43,7 +43,7 @@ export function matchJd(
   void (async () => {
     // SSE 直连后端（VITE_STREAM_BASE_URL），绕开 vite proxy——proxy 不流式转发 text/event-stream。
     // 未配置时回退到普通 API base（走 proxy，流式可能不工作但至少不报错）。
-    const base = import.meta.env.VITE_STREAM_BASE_URL || import.meta.env.VITE_API_BASE_URL || ''
+    const base = import.meta.env['VITE_STREAM_BASE_URL'] || import.meta.env.VITE_API_BASE_URL || ''
     const token = localStorage.getItem('token')
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) headers['Authorization'] = `Bearer ${token}`
