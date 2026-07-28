@@ -33,18 +33,18 @@
         </div>
       </section>
 
-      <!-- 教育背景 -->
+      <!-- 教育背景（嵌套对象数组：每个 edu 的字段绑在同一对象） -->
       <section class="section">
         <h4>教育背景</h4>
         <div
-          v-for="(_, index) in educationList"
+          v-for="(edu, index) in editedProfile.education"
           :key="index"
           class="education-item"
         >
           <div class="item-header">
             <span class="item-number">教育经历 {{ index + 1 }}</span>
             <button
-              v-if="educationList.length > 1"
+              v-if="editedProfile.education.length > 1"
               @click="removeEducation(index)"
               class="remove-btn"
               type="button"
@@ -53,24 +53,10 @@
             </button>
           </div>
           <div class="form-grid">
-            <FormField
-              label="学校"
-              v-model="editedProfile.schools[index]"
-              :confidence="getConfidence(`schools[${index}]`)"
-            />
-            <FormField
-              label="学历"
-              v-model="editedProfile.degrees[index]"
-              :confidence="getConfidence(`degrees[${index}]`)"
-            />
-            <FormField
-              label="专业"
-              v-model="editedProfile.majors[index]"
-            />
-            <FormField
-              label="毕业年份"
-              v-model="editedProfile.graduation_years[index]"
-            />
+            <FormField label="学校" v-model="edu.school" :confidence="getConfidence(`education[${index}].school`)" />
+            <FormField label="学历" v-model="edu.degree" :confidence="getConfidence(`education[${index}].degree`)" />
+            <FormField label="专业" v-model="edu.major" />
+            <FormField label="毕业年份" v-model="edu.graduation_year" />
           </div>
         </div>
         <button @click="addEducation" class="add-btn" type="button">
@@ -78,18 +64,18 @@
         </button>
       </section>
 
-      <!-- 工作经历 -->
+      <!-- 工作经历（嵌套对象数组） -->
       <section class="section">
         <h4>工作经历</h4>
         <div
-          v-for="(_, index) in workList"
+          v-for="(work, index) in editedProfile.work_experience"
           :key="index"
           class="work-item"
         >
           <div class="item-header">
             <span class="item-number">工作经历 {{ index + 1 }}</span>
             <button
-              v-if="workList.length > 1"
+              v-if="editedProfile.work_experience.length > 1"
               @click="removeWork(index)"
               class="remove-btn"
               type="button"
@@ -98,24 +84,14 @@
             </button>
           </div>
           <div class="form-grid">
-            <FormField
-              label="公司"
-              v-model="editedProfile.companies[index]"
-              :confidence="getConfidence(`companies[${index}]`)"
-            />
-            <FormField
-              label="职位"
-              v-model="editedProfile.positions[index]"
-            />
-            <FormField
-              label="时间"
-              v-model="editedProfile.durations[index]"
-            />
+            <FormField label="公司" v-model="work.company" :confidence="getConfidence(`work_experience[${index}].company`)" />
+            <FormField label="职位" v-model="work.position" />
+            <FormField label="时间" v-model="work.duration" />
           </div>
           <div class="work-description-field">
             <label>职责与成果详情（保留原文细节）</label>
             <textarea
-              v-model="editedProfile.work_descriptions[index]"
+              v-model="work.description"
               placeholder="例如：负责 XX 模块的需求分析与原型设计，推动评审通过率 95%…"
               rows="3"
             ></textarea>
@@ -138,18 +114,18 @@
         </div>
       </section>
 
-      <!-- 项目经验 -->
+      <!-- 项目经验（嵌套对象数组） -->
       <section class="section">
         <h4>项目经验</h4>
         <div
-          v-for="(_, index) in projectList"
+          v-for="(project, index) in editedProfile.projects"
           :key="index"
           class="work-item"
         >
           <div class="item-header">
             <span class="item-number">项目经历 {{ index + 1 }}</span>
             <button
-              v-if="projectList.length > 1"
+              v-if="editedProfile.projects.length > 1"
               @click="removeProject(index)"
               class="remove-btn"
               type="button"
@@ -158,19 +134,13 @@
             </button>
           </div>
           <div class="form-grid">
-            <FormField
-              label="项目名称"
-              v-model="editedProfile.project_names[index]"
-            />
-            <FormField
-              label="担任角色"
-              v-model="editedProfile.project_roles[index]"
-            />
+            <FormField label="项目名称" v-model="project.name" />
+            <FormField label="担任角色" v-model="project.role" />
           </div>
           <div class="work-description-field">
             <label>项目详情（保留原文细节）</label>
             <textarea
-              v-model="editedProfile.project_descriptions[index]"
+              v-model="project.description"
               placeholder="例如：项目背景、你的职责、核心成果数据…"
               rows="3"
             ></textarea>
@@ -243,25 +213,38 @@ const editedProfile = ref<any>(
   props.profile ? JSON.parse(JSON.stringify(props.profile)) : {}
 )
 
-// 规整详情数组：确保 work_descriptions 与 companies 等长，
-// 避免 v-model 绑定 work_descriptions[index] 时下标越界（后端可能没返回该字段或长度不一致）
+// 规整嵌套数组：兼容旧扁平结构（转嵌套）+ 兜底空数组，确保模板 v-for 安全
 ;(() => {
   const p = editedProfile.value
-  // 规整工作详情数组：与 companies 等长，避免 v-model 绑 work_descriptions[index] 越界
-  if (Array.isArray(p.companies)) {
-    if (!Array.isArray(p.work_descriptions)) p.work_descriptions = []
-    while (p.work_descriptions.length < p.companies.length) p.work_descriptions.push('')
-    p.work_descriptions.length = p.companies.length
+  // 旧扁平 → 嵌套（兼容历史画像）
+  if (!Array.isArray(p.education) && Array.isArray(p.schools)) {
+    const n = Math.max(p.schools.length, p.degrees?.length || 0)
+    p.education = Array.from({ length: n }, (_, i) => ({
+      school: p.schools[i] || '',
+      degree: p.degrees?.[i] || '',
+      major: p.majors?.[i] || '',
+      graduation_year: p.graduation_years?.[i] || '',
+    }))
   }
-  // 规整项目数组：project_roles / project_descriptions 与 project_names 等长
-  if (Array.isArray(p.project_names)) {
-    if (!Array.isArray(p.project_roles)) p.project_roles = []
-    if (!Array.isArray(p.project_descriptions)) p.project_descriptions = []
-    while (p.project_roles.length < p.project_names.length) p.project_roles.push('')
-    while (p.project_descriptions.length < p.project_names.length) p.project_descriptions.push('')
-    p.project_roles.length = p.project_names.length
-    p.project_descriptions.length = p.project_names.length
+  if (!Array.isArray(p.work_experience) && Array.isArray(p.companies)) {
+    p.work_experience = p.companies.map((c: any, i: number) => ({
+      company: c || '',
+      position: p.positions?.[i] || '',
+      duration: p.durations?.[i] || '',
+      description: p.work_descriptions?.[i] || '',
+    }))
   }
+  if (!Array.isArray(p.projects) && Array.isArray(p.project_names)) {
+    p.projects = p.project_names.map((nm: any, i: number) => ({
+      name: nm || '',
+      role: p.project_roles?.[i] || '',
+      description: p.project_descriptions?.[i] || '',
+    }))
+  }
+  // 兜底：三个嵌套数组必须存在（空画像/新画像）
+  if (!Array.isArray(p.education)) p.education = []
+  if (!Array.isArray(p.work_experience)) p.work_experience = []
+  if (!Array.isArray(p.projects)) p.projects = []
   // 个人总结兜底为字符串（避免 textarea v-model 绑 undefined 报错）
   if (p.self_summary == null) p.self_summary = ''
 })()
@@ -297,98 +280,32 @@ const languagesText = computed({
   }
 })
 
-// 教育列表
-const educationList = computed(() => {
-  const count = Math.max(
-    editedProfile.value.schools?.length || 0,
-    editedProfile.value.degrees?.length || 0
-  )
-  return Array.from({ length: count }, (_, i) => ({
-    school: editedProfile.value.schools?.[i] || '',
-    degree: editedProfile.value.degrees?.[i] || '',
-    major: editedProfile.value.majors?.[i] || '',
-    graduation_year: editedProfile.value.graduation_years?.[i] || ''
-  }))
-})
-
-// 工作列表
-const workList = computed(() => {
-  const count = Math.max(
-    editedProfile.value.companies?.length || 0,
-    editedProfile.value.positions?.length || 0
-  )
-  return Array.from({ length: count }, (_, i) => ({
-    company: editedProfile.value.companies?.[i] || '',
-    position: editedProfile.value.positions?.[i] || '',
-    duration: editedProfile.value.durations?.[i] || ''
-  }))
-})
-
-// 项目列表（只需迭代次数，v-model 直接绑 editedProfile 的并行数组）
-const projectList = computed(() => {
-  const count = editedProfile.value.project_names?.length || 0
-  return Array.from({ length: count }, (_, i) => i)
-})
+// 教育/工作/项目：模板直接 v-for editedProfile 的嵌套对象数组（不再需要 computed 拼装）
 
 const getConfidence = (field: string) => {
   return props.confidence?.[field]
 }
 
+// 增删：直接操作嵌套对象数组
 const addEducation = () => {
-  if (!editedProfile.value.schools) {
-    editedProfile.value.schools = []
-    editedProfile.value.degrees = []
-    editedProfile.value.majors = []
-    editedProfile.value.graduation_years = []
-  }
-  editedProfile.value.schools.push('')
-  editedProfile.value.degrees.push('')
-  editedProfile.value.majors.push('')
-  editedProfile.value.graduation_years.push('')
+  editedProfile.value.education.push({ school: '', degree: '', major: '', graduation_year: '' })
 }
-
 const removeEducation = (index: number) => {
-  editedProfile.value.schools?.splice(index, 1)
-  editedProfile.value.degrees?.splice(index, 1)
-  editedProfile.value.majors?.splice(index, 1)
-  editedProfile.value.graduation_years?.splice(index, 1)
+  editedProfile.value.education.splice(index, 1)
 }
 
 const addWork = () => {
-  if (!editedProfile.value.companies) {
-    editedProfile.value.companies = []
-    editedProfile.value.positions = []
-    editedProfile.value.durations = []
-    editedProfile.value.work_descriptions = []
-  }
-  editedProfile.value.companies.push('')
-  editedProfile.value.positions.push('')
-  editedProfile.value.durations.push('')
-  editedProfile.value.work_descriptions.push('')
+  editedProfile.value.work_experience.push({ company: '', position: '', duration: '', description: '' })
 }
-
 const removeWork = (index: number) => {
-  editedProfile.value.companies?.splice(index, 1)
-  editedProfile.value.positions?.splice(index, 1)
-  editedProfile.value.durations?.splice(index, 1)
-  editedProfile.value.work_descriptions?.splice(index, 1)
+  editedProfile.value.work_experience.splice(index, 1)
 }
 
 const addProject = () => {
-  if (!editedProfile.value.project_names) {
-    editedProfile.value.project_names = []
-    editedProfile.value.project_roles = []
-    editedProfile.value.project_descriptions = []
-  }
-  editedProfile.value.project_names.push('')
-  editedProfile.value.project_roles.push('')
-  editedProfile.value.project_descriptions.push('')
+  editedProfile.value.projects.push({ name: '', role: '', description: '' })
 }
-
 const removeProject = (index: number) => {
-  editedProfile.value.project_names?.splice(index, 1)
-  editedProfile.value.project_roles?.splice(index, 1)
-  editedProfile.value.project_descriptions?.splice(index, 1)
+  editedProfile.value.projects.splice(index, 1)
 }
 
 const onSave = () => {

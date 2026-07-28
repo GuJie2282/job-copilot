@@ -53,8 +53,8 @@
             <div class="item-header">
               <span class="item-title">{{ edu.school }}</span>
               <ConfidenceBadge
-                v-if="getConfidence(`schools[${index}]`)"
-                :score="getConfidence(`schools[${index}]`)?.score || 0.5"
+                v-if="getConfidence(`education[${index}].school`)"
+                :score="getConfidence(`education[${index}].school`)?.score || 0.5"
               />
             </div>
             <div class="item-details">
@@ -77,8 +77,8 @@
             <div class="item-header">
               <span class="item-title">{{ work.company }}</span>
               <ConfidenceBadge
-                v-if="getConfidence(`companies[${index}]`)"
-                :score="getConfidence(`companies[${index}]`)?.score || 0.5"
+                v-if="getConfidence(`work_experience[${index}].company`)"
+                :score="getConfidence(`work_experience[${index}].company`)?.score || 0.5"
               />
             </div>
             <div class="item-details">
@@ -129,8 +129,8 @@
             <div class="item-header">
               <span class="item-title">{{ project.name }}</span>
               <ConfidenceBadge
-                v-if="getConfidence(`project_names[${index}]`)"
-                :score="getConfidence(`project_names[${index}]`)?.score || 0.5"
+                v-if="getConfidence(`projects[${index}].name`)"
+                :score="getConfidence(`projects[${index}].name`)?.score || 0.5"
               />
             </div>
             <div v-if="project.role" class="item-details">
@@ -169,7 +169,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
 import InfoItem from './InfoItem.vue'
 import ConfidenceBadge from './ConfidenceBadge.vue'
 
@@ -178,60 +178,37 @@ const props = defineProps<{
   confidence: any
 }>()
 
-const emit = defineEmits<{
-  (e: 'edit', profile: any): void
-  (e: 'save'): void
-  (e: 'clear'): void
-}>()
+// 用「运行时数组」声明事件，确保父组件的 @clear 一定被 Vue 当作事件监听器
+// （而非 fallthrough 属性透传）。之前用纯类型声明，HMR/编译缓存下新增的 'clear'
+// 没进运行时 emits 列表，导致 emit('clear') 调不到父级处理函数（按钮有反应、但弹框不出来）。
+const emit = defineEmits(['edit', 'save', 'clear'])
 
+// 从父组件注入清空函数（provide/inject 绕过 emit/props 传递，最可靠）
+const clearProfile = inject<() => void>('clearProfile', () => {
+  console.warn('[ProfileDisplay] clearProfile 未注入（provide 没到子组件）')
+})
+
+// 教育：读嵌套对象数组（后端分段提取产出，字段绑死在同一实体，不错位）
 const educationList = computed(() => {
-  if (!props.profile?.schools) return []
-  const count = Math.min(props.profile.schools.length, props.profile.degrees?.length || 0)
-  const list = []
-  for (let i = 0; i < count; i++) {
-    list.push({
-      school: props.profile.schools[i],
-      degree: props.profile.degrees?.[i],
-      major: props.profile.majors?.[i],
-      graduation_year: props.profile.graduation_years?.[i]
-    })
-  }
-  return list
+  return (props.profile?.education || []).filter(
+    (e: any) => e && (e.school || e.degree || e.major)
+  )
 })
 
 const workList = computed(() => {
-  if (!props.profile?.companies) return []
-  const count = Math.min(props.profile.companies.length, props.profile.positions?.length || 0)
-  const list = []
-  for (let i = 0; i < count; i++) {
-    const company = props.profile.companies[i]
+  return (props.profile?.work_experience || []).filter((w: any) => {
+    const c = w?.company
     // 跳过 LLM 误填的空项（字符串 "null"/"None"）
-    if (!company || company === 'null' || company === 'None') continue
-    list.push({
-      company,
-      position: props.profile.positions?.[i],
-      duration: props.profile.durations?.[i],
-      description: props.profile.work_descriptions?.[i]
-    })
-  }
-  return list
+    return c && c !== 'null' && c !== 'None'
+  })
 })
 
-// 项目列表（扁平数组按同序拼成对象）
-// 注意：LLM 偶尔会把缺失项填成字符串 "null"/"None" 并多塞一个空项目，这里过滤掉
+// 项目：读嵌套对象数组；过滤 LLM 偶发填的空名（"null"/"None"）
 const projectList = computed(() => {
-  if (!props.profile?.project_names) return []
-  const list = []
-  for (let i = 0; i < props.profile.project_names.length; i++) {
-    const name = props.profile.project_names[i]
-    if (!name || name === 'null' || name === 'None') continue
-    list.push({
-      name,
-      role: props.profile.project_roles?.[i],
-      description: props.profile.project_descriptions?.[i]
-    })
-  }
-  return list
+  return (props.profile?.projects || []).filter((p: any) => {
+    const n = p?.name
+    return n && n !== 'null' && n !== 'None'
+  })
 })
 
 const getConfidence = (field: string) => {
@@ -256,7 +233,8 @@ const onSave = () => {
 }
 
 const onClear = () => {
-  emit('clear')
+  console.log('[ProfileDisplay] 清空按钮被点击 → 调用 inject 的 clearProfile')
+  clearProfile()
 }
 </script>
 
@@ -409,6 +387,13 @@ const onClear = () => {
   display: flex;
   gap: 1rem;
   margin-top: 2rem;
+  position: sticky;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  padding: 1rem 0;
+  border-top: 1px solid #e5e7eb;
+  z-index: 10;
 }
 
 .actions button {

@@ -35,6 +35,7 @@ SCALAR_FIELDS = (
     "email",
     "phone",
     "location",
+    "avatar_url",
     "location_preference",
     "salary_range",
     "industry",
@@ -64,6 +65,60 @@ def _split_profile(profile: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, A
     return scalars, detail
 
 
+# 旧扁平平行数组的字段名（读取迁移用，对应 change add-streaming-pipeline 决策 6）
+_LEGACY_FLAT_FIELDS = (
+    "schools", "degrees", "majors", "graduation_years",
+    "companies", "positions", "durations", "work_descriptions",
+    "project_names", "project_roles", "project_descriptions",
+)
+
+
+def _migrate_legacy_flat_to_nested(profile: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    旧扁平平行数组 → 嵌套对象数组（一次性读取迁移）。
+
+    历史画像可能是旧扁平结构（schools[]/degrees[]/... 靠下标对齐）；读取时转成嵌套
+    （education[{school,degree,...}]），并清理旧字段。新画像本就是嵌套、无旧字段时为空操作。
+    """
+    if not profile:
+        return profile
+    # 没有任何 legacy 字段 → 已是新结构，直接返回
+    if not any(k in profile for k in _LEGACY_FLAT_FIELDS):
+        return profile
+
+    p = dict(profile)
+
+    def _zip(obj_keys, lists):
+        """按最长列表生成对象数组，缺位填 None（lists 元素可能为 None）"""
+        n = max((len(lst) for lst in lists if isinstance(lst, list)), default=0)
+        return [
+            {k: (lists[i][idx] if isinstance(lists[i], list) and idx < len(lists[i]) else None)
+             for i, k in enumerate(obj_keys)}
+            for idx in range(n)
+        ]
+
+    if not p.get("education"):
+        p["education"] = _zip(
+            ["school", "degree", "major", "graduation_year"],
+            [p.get("schools"), p.get("degrees"), p.get("majors"), p.get("graduation_years")],
+        )
+    if not p.get("work_experience"):
+        p["work_experience"] = _zip(
+            ["company", "position", "duration", "description"],
+            [p.get("companies"), p.get("positions"), p.get("durations"), p.get("work_descriptions")],
+        )
+    if not p.get("projects"):
+        p["projects"] = _zip(
+            ["name", "role", "description"],
+            [p.get("project_names"), p.get("project_roles"), p.get("project_descriptions")],
+        )
+
+    # 清理旧扁平字段，避免新旧并存
+    for k in _LEGACY_FLAT_FIELDS:
+        p.pop(k, None)
+    return p
+
+
 def _merge_profile(row: UserProfileModel) -> Optional[Dict[str, Any]]:
     """
     把数据库行合并回完整的画像 dict（明细 JSON + 标量列 + 元信息）。
@@ -87,6 +142,9 @@ def _merge_profile(row: UserProfileModel) -> Optional[Dict[str, Any]]:
         profile["quality_score"] = row.quality_score
     if row.source is not None:
         profile["source"] = row.source
+
+    # 4. 一次性读取迁移：旧扁平平行数组 → 嵌套对象数组（兼容历史画像）
+    profile = _migrate_legacy_flat_to_nested(profile)
 
     return profile
 

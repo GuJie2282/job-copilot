@@ -201,8 +201,9 @@ def resume_finalize_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # 导出 HTML（失败不阻断：html 留空，仍落库 Markdown）
     html = None
     theme = state.get("resume_theme")
+    avatar_url = profile.get("avatar_url") or ""
     try:
-        result = export_resume(md, target_position, title)
+        result = export_resume(md, target_position, title, avatar_url)
         html = result["html"]
         theme = result["theme"]
     except Exception as e:

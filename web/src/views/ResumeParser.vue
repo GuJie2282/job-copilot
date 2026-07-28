@@ -44,6 +44,11 @@
         <span class="spinner" />
         <p>{{ loadingMessage }}</p>
       </div>
+      <!-- AI 思考过程（reasoning，灰色斜体可折叠） -->
+      <details v-if="isLoading && reasoningText" style="margin-top: 0.75rem;">
+        <summary style="cursor: pointer; color: #6b7280; font-size: 0.85rem;">🧠 AI 思考中…（可展开）</summary>
+        <pre v-auto-scroll style="margin-top: 0.5rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; color: #6b7280; font-style: italic; font-size: 0.85rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto;">{{ reasoningText }}▍</pre>
+      </details>
 
       <!-- 解析结果 -->
       <div v-if="parseResult && !isLoading" class="result">
@@ -81,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, provide } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -108,6 +113,7 @@ const userStore = useUserStore()
 const inputMethod = ref<'file' | 'text'>('file')
 const isLoading = ref(false)
 const loadingMessage = ref('')
+const reasoningText = ref('')  // AI 思考过程（reasoning，思考区展示）
 const parseResult = ref<any>(null)
 const showProfile = ref(false)
 const error = ref<any>(null)
@@ -163,41 +169,60 @@ const onFileUpload = async (file: File) => {
   }
 }
 
-// 文本提交处理
-const onTextSubmit = async (text: string) => {
-  isLoading.value = true
-  loadingMessage.value = '正在解析文本...'
-  error.value = null
-
-  try {
-    const response = await resumeApi.parseText({
-      text,
-      user_id: userStore.userId || ''
-    })
-
-    if (response.status === 'success' || response.status === 'warning') {
-      parseResult.value = {
-        text: text,
-        quality_score: response.quality_score || 0,
-        warnings: response.warnings || [],
-        profile: response.profile || null,
-        confidence: response.confidence || null
-      }
-      showProfile.value = true
-    } else {
-      error.value = {
-        type: 'error',
-        message: response.message || '解析失败，请重试'
-      }
-    }
-  } catch (err: any) {
-    error.value = {
-      type: 'error',
-      message: err.message || '解析失败，请检查网络连接'
-    }
-  } finally {
-    isLoading.value = false
+// 段名 → profile 字段：把分段结果合进 partial profile（画像逐段成型）
+function mergeSection(profile: any, section: string, data: any) {
+  if (!profile) return
+  if (section === 'basic' || section === 'skills') {
+    Object.assign(profile, data || {})
+  } else if (section === 'education') {
+    profile.education = data
+  } else if (section === 'work') {
+    profile.work_experience = data
+  } else if (section === 'project') {
+    profile.projects = data
   }
+}
+
+// 文本提交处理（流式分段提取：stage 进度 + segment 逐段成型 + done 定稿）
+// 用 SSE 流式取代旧同步 parseText：持续接收事件保活，不再有 180s 超时墙；画像逐段成型。
+const onTextSubmit = (text: string) => {
+  isLoading.value = true
+  loadingMessage.value = '正在解析文本…'
+  reasoningText.value = ''  // 思考区重置
+  error.value = null
+  parseResult.value = null
+  showProfile.value = false
+
+  resumeApi.parseResumeStream(
+    { text, user_id: userStore.userId || '' },
+    {
+      onStage: (p) => { loadingMessage.value = p.message },
+      onReasoning: (p) => { reasoningText.value += p.delta },
+      onSegment: (p) => {
+        // 逐段成型：把段结果合进 partial profile，第一段到位即展示
+        if (!parseResult.value) {
+          parseResult.value = { text, quality_score: 0, warnings: [], profile: {}, confidence: {} }
+        }
+        mergeSection(parseResult.value.profile, p.section, p.data)
+        showProfile.value = true
+      },
+      onDone: (p) => {
+        parseResult.value = {
+          text: p.text,
+          quality_score: p.quality_score || 0,
+          warnings: p.warnings || [],
+          profile: p.profile,
+          confidence: p.confidence,
+        }
+        showProfile.value = true
+        isLoading.value = false
+      },
+      onError: (p) => {
+        error.value = { type: 'error', message: p.error_message || '解析失败，请重试' }
+        isLoading.value = false
+      },
+    },
+  )
 }
 
 // 示例简历：切换到文本模式并直接解析示例文本
@@ -259,6 +284,7 @@ const onSave = async () => {
 
 // 清空画像（由 ProfileDisplay 的"清空画像"触发）—— 二次确认后删除数据库画像并重置页面
 const onClear = async () => {
+  console.log('[ResumeParser] onClear 被调用，准备弹确认框')
   try {
     await ElMessageBox.confirm(
       '确定要清空当前画像吗？将同时删除已保存的画像数据，此操作不可撤销。',
@@ -286,6 +312,10 @@ const onClear = async () => {
   isEditing.value = false
   error.value = null
 }
+
+// 通过 provide 把清空函数注入 ProfileDisplay 子组件，子组件 inject 后直接调用。
+// Vue 原生依赖注入，不走事件/props，规避之前 emit('clear') 调不到父处理的问题。
+provide('clearProfile', onClear)
 
 // 后续功能导航（由 NextStepsCard 触发）
 const onNavigate = async (route: string) => {

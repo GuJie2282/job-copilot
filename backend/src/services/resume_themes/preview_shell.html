@@ -240,6 +240,8 @@
           scaler.appendChild(page);
         });
         fitScale();
+        // 精修模式：分页重建 DOM 后重挂 contenteditable（否则 load/fonts 触发的 render 会清掉编辑态）
+        if(window.__refineRehook) window.__refineRehook();
       }
       function fitScale(){
         var pageWPx=210*PX_PER_MM,s=Math.min(1,viewport.clientWidth/pageWPx)*rvUserScale;
@@ -262,7 +264,7 @@
       document.getElementById('rvZoomIn').addEventListener('click',function(){
         rvUserScale=Math.min(2,+(rvUserScale+0.1).toFixed(2));fitScale();});
       document.getElementById('rvZoomOut').addEventListener('click',function(){
-        rvUserScale=Math.min(2,+(rvUserScale+0.1).toFixed(2));fitScale();});
+        rvUserScale=Math.max(0.3,+(rvUserScale-0.1).toFixed(2));fitScale();});
 
       // 暴露给编辑模式：按当前页面内容重新分页（保留编辑后的 DOM 节点）
       window.__reflow = function(){
@@ -280,7 +282,7 @@
         });
         fitScale();
         // 重新挂 contenteditable
-        var sel='.bullet,.summary p,.desc,.entry-title,.entry-meta span,.name,.role,.edu-line,.contact,.name-block .cn,.name-block .en,.one';
+        var sel='.bullet,.summary p,.desc,.entry-title,.entry-meta span,.entry-date,.name,.role,.edu-line,.contact,.name-block .cn,.name-block .en,.one';
         document.querySelectorAll('#scaler '+sel).forEach(function(el){
           if(window.__editing){ el.contentEditable=true; el.style.outline='1px dashed var(--accent, #888)'; }
         });
@@ -291,10 +293,19 @@
     (function(){
       var editing=false, editBtn=document.getElementById('rvEditBtn'), saveBtn=document.getElementById('rvSaveBtn');
       var reflowTimer=null;
+      var composing=false; // IME 输入法 composition 状态（中文输入中不重排，避免打断）
+      var __scaler=document.querySelector('#scaler');
+      if(__scaler){
+        __scaler.addEventListener('compositionstart',function(){composing=true;});
+        __scaler.addEventListener('compositionend',function(){composing=false;afterEdit();});
+        // 失焦时补一次重排：编辑期间为保光标跳过了重排，失焦后（此时无光标）更新分页。
+        // 用户若重新聚焦编辑，afterEdit 会取消这个待触发的重排，避免打字中途被打断。
+        __scaler.addEventListener('focusout',function(){ scheduleReflow(); });
+      }
 
       function setEditable(on){
         window.__editing=on;
-        var sel='.bullet,.summary p,.desc,.entry-title,.entry-meta span,.name,.role,.edu-line,.contact,.name-block .cn,.name-block .en,.one';
+        var sel='.bullet,.summary p,.desc,.entry-title,.entry-meta span,.entry-date,.name,.role,.edu-line,.contact,.name-block .cn,.name-block .en,.one';
         document.querySelectorAll('#scaler '+sel).forEach(function(el){
           el.contentEditable=on;
           el.style.outline=on?'1px dashed var(--accent, #888)':'';
@@ -341,14 +352,36 @@
         });
       }
 
+      // 焦点是否落在编辑区：iframe 整体有焦点 + 当前活跃元素在 #scaler 内。
+      // 注意必须先判 document.hasFocus()——iframe 失焦时 activeElement 仍指向最后聚焦的元素，
+      // 光看 activeElement 会误判「还在编辑」，导致用户切出后该排的不排。
+      function focusInEditor(){
+        if(!document.hasFocus()) return false;
+        var ae=document.activeElement, root=__scaler||document.querySelector('#scaler');
+        return !!(root && ae && root.contains(ae));
+      }
       function afterEdit(){
-        // 隐藏空 bullet
+        if(composing) return; // IME composition 中不重排（否则打断中文输入，拼音被提交成英文）
+        // 隐藏空 bullet（纯样式，不动 DOM 结构，不影响光标）
         document.querySelectorAll('#scaler .bullet').forEach(function(b){
           b.style.display=b.textContent.trim()?'':'none';
         });
-        // 防抖重排
+        // ⚠️ 光标仍在编辑区（用户正在打字，或从一行切到另一行）→ 不重排。
+        // 重排会 scaler.innerHTML='' 再重建、移动 atom 节点 → 光标 Selection 失效（丢光标），
+        // 还可能让正在编辑的行跳到别的页（视觉跳动）。延后到真正离开编辑区时再排。
+        if(focusInEditor()){
+          // 取消 focusout 排好的待触发重排，避免切行后停顿一下被中途触发
+          if(reflowTimer){ clearTimeout(reflowTimer); reflowTimer=null; }
+          return;
+        }
+        scheduleReflow();
+      }
+      // 防抖重排：回调触发前再做一次焦点确认——focusout 可能只是「A 行 → B 行」的切换，
+      // 等到点真正执行时用户多半又聚焦回某行了，这时排会丢光标，必须放掉。
+      function scheduleReflow(){
         if(reflowTimer) clearTimeout(reflowTimer);
         reflowTimer=setTimeout(function(){
+          if(focusInEditor()) return; // 仍在编辑（切行后停顿）→ 放弃本次重排
           if(window.__reflow) window.__reflow();
           // 重排后重新隐藏空 bullet
           document.querySelectorAll('#scaler .bullet').forEach(function(b){
@@ -432,6 +465,88 @@
         ta.select();
         rvShowToast('已生成 Markdown，可复制');
       });
+
+      /* ===== 精修工作台：手动编辑回流（evolve-resume-refine Tasks 4.3/4.4）=====
+         父页面（精修模式）通过 iframe.contentWindow.__setRefineMode(true) 进入编辑态；
+         flushEdits 时调 __collectPatches() 拿「相对基线改动的原子」，回写到 Markdown 真相源。
+         采集粒度：单文本原子（bullet/summary/name/role/edu/org/entry-role/date），
+         对比渲染时记录的初始文本，只输出改动（未编辑不回写，保留 ** 等内联格式）。
+         contact 的细粒度回写暂不支持（走对话改）；stack-row 走 cat+chips 重组回写。 */
+      window.__refineMode = false;
+      window.__initialTexts = {};
+      var __EDIT_ATOMS = '#scaler .bullet, #scaler .summary, #scaler .edu-line, '
+        + '#scaler .name-row .name, #scaler .name-row .role, '
+        + '#scaler .entry-title .org, #scaler .entry-title .role, #scaler .entry-date, '
+        + '#scaler .stack-row';
+
+      // 读 stack-row 的 cat + chips（排除编辑按钮 chip-del(×)/chip-add(+) 的文本噪声）。
+      // 暴露给父页 partialUpdate 做 stack-row 冲突检测（用户手改过则不静默覆盖）。
+      window.__readStack = function (row) {
+        if (!row) return { cat: '', chips: [] };
+        var cat = (row.querySelector('.cat') || {}).textContent || '';
+        var chips = Array.prototype.slice.call(row.querySelectorAll('.chip')).map(function (c) {
+          var clone = c.cloneNode(true);
+          var del = clone.querySelector('.chip-del'); if (del) del.remove();
+          return clone.textContent.trim();
+        }).filter(Boolean);
+        return { cat: cat.trim(), chips: chips };
+      };
+      function __stackSig(row) {
+        var s = window.__readStack(row);
+        return s.cat + '||' + s.chips.join('·');
+      }
+
+      window.__recordInitial = function () {
+        window.__initialTexts = {};
+        document.querySelectorAll(__EDIT_ATOMS).forEach(function (el) {
+          var k = el.getAttribute('data-md-line') + '|' + (el.getAttribute('data-md-field') || '');
+          // stack-row 基线用 cat+chips 签名（排除编辑按钮），而非 raw textContent
+          window.__initialTexts[k] = el.classList.contains('stack-row') ? __stackSig(el) : el.textContent.trim();
+        });
+      };
+      window.__collectPatches = function () {
+        var patches = [];
+        if (!window.__initialTexts || !Object.keys(window.__initialTexts).length) window.__recordInitial();
+        document.querySelectorAll(__EDIT_ATOMS).forEach(function (el) {
+          var line = parseInt(el.getAttribute('data-md-line'), 10);
+          if (isNaN(line)) return;
+          var field = el.getAttribute('data-md-field') || '';
+          var k = line + '|' + field;
+          if (el.classList.contains('stack-row')) {
+            // stack-row：cat + chips 改动 → field=stack patch（后端按 `- cat: chip · chip` 重组）
+            if (window.__initialTexts[k] !== __stackSig(el)) {
+              var s = window.__readStack(el);
+              patches.push({ line: line, field: 'stack', cat: s.cat, chips: s.chips });
+            }
+            return;
+          }
+          var text = el.textContent.trim();
+          if (window.__initialTexts[k] !== text) {
+            var p = { line: line, text: text };
+            if (field) p.field = field;
+            patches.push(p);
+          }
+        });
+        return patches;
+      };
+      /* render 重建 DOM 后回调：精修模式下重挂 contenteditable（修复编辑框选丢失） */
+      window.__refineRehook = function () {
+        if (window.__refineMode) setEditable(true);
+      };
+      /* 进入精修模式：自动开编辑态 + 记录基线 + 隐藏手动保存/导出按钮（由父页统一处理） */
+      window.__setRefineMode = function (on) {
+        window.__refineMode = !!on;
+        if (on) {
+          editing = true;
+          editBtn.textContent = '查看';
+          setEditable(true);
+          editBtn.style.display = 'none';
+          saveBtn.style.display = 'none';
+          pdfBtn.style.display = 'none';
+          document.querySelector('#scaler').addEventListener('input', afterEdit);
+          window.__recordInitial();
+        }
+      };
     })();
   </script>
 </body>

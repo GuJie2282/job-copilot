@@ -3,6 +3,7 @@
  */
 
 import client from './client'
+import { openSseStream } from '@/utils/sse'
 
 /**
  * 解析文件
@@ -30,6 +31,24 @@ export async function parseText(data: {
     timeout: 180000  // 同 parseFile：文本解析也要走 LLM 提取，耗时较长
   })
   return response
+}
+
+/**
+ * 文本流式解析（SSE 分段提取）：逐段推送 stage/segment/done/error。
+ * 用公共 openSseStream（fetch + ReadableStream），直连 VITE_STREAM_BASE_URL 绕开 vite proxy。
+ * 返回 AbortController 供取消；持续接收事件即保活，不再有同步请求的超时墙。
+ */
+export function parseResumeStream(
+  data: { text: string; user_id?: string },
+  handlers: {
+    onStage?: (p: { message: string; node?: string }) => void
+    onReasoning?: (p: { delta: string }) => void
+    onSegment?: (p: { section: string; data: any }) => void
+    onDone?: (p: { status: string; quality_score: number; profile: any; confidence: any; text: string; warnings?: string[] }) => void
+    onError?: (p: { error_code: string; error_message: string }) => void
+  },
+): AbortController {
+  return openSseStream('/resume/parse-stream', data, handlers)
 }
 
 /**
@@ -128,6 +147,24 @@ export async function generateResume(data: {
 }
 
 /**
+ * 简历生成流式（SSE 节点级 stage + done/error）。
+ * 用公共 openSseStream（fetch + ReadableStream），直连 VITE_STREAM_BASE_URL 绕开 vite proxy。
+ * 返回 AbortController 供取消；持续接收事件即保活，不再有 300s 超时墙。
+ */
+export function generateResumeStream(
+  data: { target_position: string; jd_result_id?: string; jd_text?: string; gaps?: any[]; user_id?: string },
+  handlers: {
+    onStage?: (p: { message: string; node?: string }) => void
+    onToken?: (p: { delta: string }) => void
+    onReasoning?: (p: { delta: string }) => void
+    onDone?: (p: { resume_id: string; version: number; content_md: string; html: string; eval_report: any; refine_offered: boolean }) => void
+    onError?: (p: { error_code: string; error_message: string }) => void
+  },
+): AbortController {
+  return openSseStream('/resume/generate', data, handlers)
+}
+
+/**
  * 查询简历（按岗位分组、版本倒序）
  */
 export async function listResumes(userId: string) {
@@ -165,4 +202,51 @@ export async function refineResume(
  */
 export async function finalizeResume(resumeId: string, data: { user_id: string }) {
   return await client.post(`/resume/${resumeId}/finalize`, data, { timeout: 120000 })
+}
+
+/**
+ * 精修流式（对话式工作台主通道，SSE）：
+ * - reasoning → onReasoning（思考区灰斜体打字机）
+ * - token → onToken（AI 自然语言说明，一次性）
+ * - done → onDone（含 reply / resume_md / html / eval_report / round / resumed）
+ * - error → onError
+ */
+export function refineResumeStream(
+  resumeId: string,
+  data: { user_id: string; feedback?: string },
+  handlers: {
+    onStage?: (p: { message: string; node?: string }) => void
+    onReasoning?: (p: { delta: string }) => void
+    onToken?: (p: { delta: string }) => void
+    onDone?: (p: {
+      reply: string
+      resume_md: string
+      html: string
+      eval_report: any
+      round: number
+      resumed: boolean
+    }) => void
+    onError?: (p: { error_code: string; error_message: string }) => void
+  },
+): AbortController {
+  return openSseStream(`/resume/${resumeId}/refine-stream`, data, handlers)
+}
+
+/**
+ * 手动编辑回写（左侧「所见即所得」编辑的 patch 局部回写到 Markdown 真相源）。
+ * 返回回写后的新 MD + 重新装配的预览 HTML + 未命中告警。
+ */
+export async function patchDraft(
+  resumeId: string,
+  data: { user_id: string; patches: any[] },
+) {
+  return await client.post(`/resume/${resumeId}/patch-draft`, data, { timeout: 60000 })
+}
+
+/**
+ * 上传头像（add-resume-avatar）：multipart 图片 → 后端存文件系统 + URL 入库。
+ * user_id 走 query（multipart body 不便传）；FormData 不要手设 Content-Type（client 自动加 multipart）。
+ */
+export async function uploadAvatar(userId: string, formData: FormData) {
+  return await client.post(`/resume/avatar?user_id=${encodeURIComponent(userId)}`, formData, { timeout: 60000 })
 }

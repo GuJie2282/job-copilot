@@ -24,8 +24,14 @@ import logging
 from typing import Dict, Any
 
 from langchain_core.messages import AIMessage
+from langgraph.types import StreamWriter
 
-from src.services.resume_generator import generate_resume
+from src.services.resume_generator import (
+    generate_resume,
+    generate_resume_stream,
+    generate_resume_reasoning_stream,
+    _clean_markdown,
+)
 from src.services.resume_evaluator import evaluate_resume
 from src.services.resume_validator import validate_resume_md
 from src.services.profile_service import get_profile
@@ -107,17 +113,28 @@ def resume_prepare_node(state: Dict[str, Any]) -> Dict[str, Any]:
 # 2. resume_generate_node：调用生成服务
 # ============================================================================
 
-def resume_generate_node(state: Dict[str, Any]) -> Dict[str, Any]:
+async def resume_generate_node(state: Dict[str, Any], writer: StreamWriter) -> Dict[str, Any]:
     """
-    调用 resume_generator 生成 Markdown 简历，迭代轮次 +1。
-    生成失败（LLM 异常，service 内部已重试）→ resume_status_code=llm_failed。
+    调用 resume_generator 生成 Markdown 简历（glm-4.5 reasoning），迭代轮次 +1。
+    用 generate_resume_reasoning_stream 增量产出，逐 (kind, delta) 经 writer 推送 custom event：
+      reasoning → SSE reasoning（AI 思考过程，前端思考区展示）
+      content   → SSE token（简历正文）
+    生成失败 → resume_status_code=llm_failed。
     """
     profile = state.get("profile_snapshot") or {}
     gaps = state.get("gaps_snapshot") or []
     target_position = state.get("target_position")
     jd_text = state.get("jd_text")
     try:
-        md = generate_resume(profile, gaps, target_position, jd_text)
+        content_parts: list = []
+        async for kind, delta in generate_resume_reasoning_stream(profile, gaps, target_position, jd_text):
+            # 推 custom event：reasoning 或 token，端点 astream custom 转 SSE
+            writer({"type": "reasoning" if kind == "reasoning" else "token", "delta": delta})
+            if kind == "content":
+                content_parts.append(delta)
+        md = _clean_markdown("".join(content_parts))
+        if not md or len(md) < 50:
+            raise ValueError(f"生成内容过短（{len(md)} 字符），可能生成失败")
         return {
             "resume_md": md,
             "resume_round": (state.get("resume_round") or 0) + 1,  # 生成次数 +1
@@ -209,10 +226,11 @@ def resume_export_node(state: Dict[str, Any]) -> Dict[str, Any]:
     target_position = state.get("target_position") or ""
     # 标题 = 姓名-岗位（= 浏览器「另存为 PDF」默认文件名）
     name = (state.get("profile_snapshot") or {}).get("name") or "简历"
+    avatar_url = (state.get("profile_snapshot") or {}).get("avatar_url") or ""
     title = f"{name}-{target_position}" if target_position else name
 
     try:
-        result = export_resume(md, target_position, title)
+        result = export_resume(md, target_position, title, avatar_url)
         issues = result["audit"]["issues"]
         msg = (f"✅ HTML 导出完成（主题 {result['theme']}，"
                f"约 {result['pages']['estimated_pages']} 页）")

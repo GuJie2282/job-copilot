@@ -20,7 +20,7 @@ import re
 import json
 import time
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Generator, AsyncGenerator, Tuple
 
 from src.graph.config import get_llm
 from src.graph.prompts import get_resume_generation_prompt, get_resume_refine_prompt
@@ -230,3 +230,169 @@ def refine_resume(
 
     logger.error(f"简历精修重试 {max_retries} 次仍失败，放弃。最后错误：{last_error}")
     raise last_error
+
+
+# ============================================================================
+# 增量生成（流式：token 级输出，对应 change add-streaming-pipeline 决策 7/10）
+# 与上面的同步版本并存：自由文本任务（简历生成/精修）用 stream 版逐字 yield，
+# 供流式管线以 token 事件下发打字机效果。
+# ============================================================================
+
+def generate_resume_stream(
+    profile: Dict[str, Any],
+    gaps: List[Dict[str, Any]],
+    target_position: str,
+    jd_text: Optional[str] = None,
+) -> Generator[str, None, None]:
+    """
+    增量生成简历（路径 A），逐 token yield 文本片段。
+
+    与 generate_resume 的区别：
+    - 用 llm.stream(prompt) 增量产出，每来一个 token 就 yield，供流式管线逐字下发
+    - 调用方拼接完整文本后，用 _clean_markdown 清理代码块包裹、做长度校验
+    - 不内置重试：流式输出无法从中断处续传，失败直接抛（由调用方决定是否整段重来）
+
+    Args:
+        profile / gaps / target_position / jd_text：同 generate_resume
+    Yields:
+        token 文本片段（delta）
+    """
+    if not profile:
+        raise ValueError("画像为空，无法生成简历")
+    if not target_position:
+        raise ValueError("目标岗位为空")
+
+    profile_text = json.dumps(profile, ensure_ascii=False, indent=2)
+    has_gaps = bool(gaps)
+    gaps_text = _format_gaps_with_strategy(gaps) if has_gaps else ""
+    prompt = get_resume_generation_prompt(profile_text, gaps_text, target_position, has_gaps, jd_text)
+
+    # 生成是创作任务，温度同同步版本（0.3）；stream 逐 chunk 产出 token
+    llm = get_llm(temperature=0.3)
+    for chunk in llm.stream(prompt):
+        delta = chunk.content or ""
+        if delta:
+            yield delta
+
+
+async def generate_resume_reasoning_stream(
+    profile: Dict[str, Any],
+    gaps: List[Dict[str, Any]],
+    target_position: str,
+    jd_text: Optional[str] = None,
+) -> AsyncGenerator[Tuple[str, str], None]:
+    """
+    增量生成简历（glm-4.5 reasoning），yield (kind, delta)：
+      kind="reasoning" —— AI 思考过程（供前端思考区展示）
+      kind="content"   —— 简历正文（Markdown）
+
+    用 openai client 直调 glm-4.5 拿 reasoning_content（LangChain 默认丢）。
+    与 generate_resume_stream（LangChain, glm-4-flash, 仅 content）并存。
+    """
+    if not profile:
+        raise ValueError("画像为空，无法生成简历")
+    if not target_position:
+        raise ValueError("目标岗位为空")
+
+    profile_text = json.dumps(profile, ensure_ascii=False, indent=2)
+    has_gaps = bool(gaps)
+    gaps_text = _format_gaps_with_strategy(gaps) if has_gaps else ""
+    prompt = get_resume_generation_prompt(profile_text, gaps_text, target_position, has_gaps, jd_text)
+
+    from src.services.llm_reasoning import stream_chat_with_reasoning
+    async for kind, delta in stream_chat_with_reasoning(prompt, temperature=0.3):
+        yield kind, delta
+
+
+def refine_resume_stream(
+    current_md: str,
+    feedback: str,
+    profile: Dict[str, Any],
+    gaps: List[Dict[str, Any]],
+    target_position: str,
+) -> Generator[str, None, None]:
+    """
+    增量精修简历（路径 B），逐 token yield。
+
+    约定同 generate_resume_stream（stream、不重试、调用方拼接后 clean）。Args 同 refine_resume。
+
+    Yields:
+        token 文本片段（delta）
+    """
+    if not current_md:
+        raise ValueError("当前简历草稿为空，无法精修")
+    if not feedback or not feedback.strip():
+        raise ValueError("用户反馈为空，无法精修")
+
+    profile_text = json.dumps(profile or {}, ensure_ascii=False, indent=2)
+    has_gaps = bool(gaps)
+    gaps_text = _format_gaps_with_strategy(gaps) if has_gaps else ""
+    prompt = get_resume_refine_prompt(current_md, feedback, profile_text, gaps_text, target_position, has_gaps)
+
+    llm = get_llm(temperature=0.3)
+    for chunk in llm.stream(prompt):
+        delta = chunk.content or ""
+        if delta:
+            yield delta
+
+
+async def refine_resume_reasoning_stream(
+    current_md: str,
+    feedback: str,
+    profile: Dict[str, Any],
+    gaps: List[Dict[str, Any]],
+    target_position: str,
+) -> AsyncGenerator[Tuple[str, str], None]:
+    """
+    增量精修简历（glm-4.5 reasoning），yield (kind, delta)：
+      kind="reasoning" —— AI 思考过程（供前端思考区展示）
+      kind="content"   —— 自然语言说明 + 改写后简历（prompt 约定用 <<<REPLY>>>/<<<RESUME>>> 分隔）
+
+    用 openai client 直调 glm-4.5 拿 reasoning_content（LangChain 默认丢）。
+    与 refine_resume_stream（LangChain, glm-4-flash, 仅 content）并存。
+    """
+    if not current_md:
+        raise ValueError("当前简历草稿为空，无法精修")
+    if not feedback or not feedback.strip():
+        raise ValueError("用户反馈为空，无法精修")
+
+    profile_text = json.dumps(profile or {}, ensure_ascii=False, indent=2)
+    has_gaps = bool(gaps)
+    gaps_text = _format_gaps_with_strategy(gaps) if has_gaps else ""
+    prompt = get_resume_refine_prompt(current_md, feedback, profile_text, gaps_text, target_position, has_gaps)
+
+    from src.services.llm_reasoning import stream_chat_with_reasoning
+    async for kind, delta in stream_chat_with_reasoning(prompt, temperature=0.3):
+        yield kind, delta
+
+
+def split_reply_resume(content: str) -> Tuple[str, Optional[str]]:
+    """
+    切分精修 LLM 的结构化输出（prompt 约定：`<<<REPLY>>>说明<<<RESUME>>>简历`）。
+
+    精修流式端点把 LLM 的 content 攒齐后调用本函数，切出「自然语言说明」与「改写后简历」，
+    分别下发（说明走 token 事件、简历随 done 下发，使前端思考/说明/简历三层分离呈现）。
+
+    Returns:
+        (reply, resume_md)
+        - 正常：reply=自然语言说明，resume_md=改写后的完整 Markdown 简历（已去代码块包裹）
+        - 降级（无 <<<RESUME>>>）：reply=说明（或整段 content），resume_md=None
+          → 调用方应沿用上一版简历并提示「本次未生成新简历」
+    """
+    reply_mark = "<<<REPLY>>>"
+    resume_mark = "<<<RESUME>>>"
+
+    r_idx = content.find(reply_mark)
+    if r_idx < 0:
+        # 无 REPLY 标记：LLM 未按约定输出，整段当说明，无新简历
+        return content.strip(), None
+    after_reply = content[r_idx + len(reply_mark):]
+
+    s_idx = after_reply.find(resume_mark)
+    if s_idx < 0:
+        # 有 REPLY 无 RESUME：说明有，简历缺
+        return after_reply.strip(), None
+
+    reply = after_reply[:s_idx].strip()
+    resume_md = _clean_markdown(after_reply[s_idx + len(resume_mark):].strip())
+    return reply, resume_md

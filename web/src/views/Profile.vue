@@ -31,7 +31,11 @@
     <template v-else>
       <!-- SIGNATURE：职业身份卡（编码"你是谁、做什么、擅长什么、画像多可靠"） -->
       <section v-if="!isEditing" class="identity-card">
-        <div class="id-avatar">{{ initials }}</div>
+        <label class="id-avatar" :class="{ uploading: avatarUploading }" :title="profile?.avatar_url ? '点击更换头像' : '点击上传头像'">
+          <img v-if="profile?.avatar_url" :src="profile.avatar_url" alt="头像" />
+          <span v-else>{{ initials }}</span>
+          <input type="file" accept="image/jpeg,image/png" hidden @change="onAvatarChange" />
+        </label>
         <div class="id-main">
           <div class="id-name-row">
             <h2 class="id-name">{{ profile?.name || '求职者' }}</h2>
@@ -71,11 +75,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, provide } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { getProfile, updateProfile } from '@/api/resume'
+import { getProfile, updateProfile, deleteProfile, uploadAvatar } from '@/api/resume'
 import ProfileDisplay from '@/components/ProfileDisplay.vue'
 import ProfileEditor from '@/components/ProfileEditor.vue'
 
@@ -101,17 +105,18 @@ const initials = computed(() => {
   return n ? n.charAt(0).toUpperCase() : '求'
 })
 
-// 最近一段职位 @ 公司（positions/companies 并行数组取首项）
+// 最近一段职位 @ 公司（work_experience 嵌套数组取首项）
 const latestPosition = computed(() => {
-  const p = profile.value || {}
-  const pos = p.positions?.[0]
-  const comp = p.companies?.[0]
+  const w = profile.value?.work_experience?.[0]
+  if (!w) return ''
+  const pos = w.position
+  const comp = w.company
   if (pos && comp) return `${pos} @ ${comp}`
   return pos || comp || ''
 })
 
-// 工作经历段数（companies 长度，近似）
-const workCount = computed(() => profile.value?.companies?.length ?? 0)
+// 工作经历段数（work_experience 数组长度）
+const workCount = computed(() => profile.value?.work_experience?.length ?? 0)
 
 // 核心技能标签（技术技能取前 4）
 const topSkills = computed(() => (profile.value?.technical_skills || []).slice(0, 4))
@@ -182,6 +187,66 @@ async function onSave(): Promise<void> {
   }
 }
 
+/** 上传/更换头像（add-resume-avatar）：点头像触发文件选择 → 上传 → 回显。
+ *  前端预校验 ≤2MB；后端再校验类型/魔数。上传中头像半透明 + 禁用态。 */
+const avatarUploading = ref(false)
+async function onAvatarChange(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  if (file.size > 2 * 1024 * 1024) {
+    ElMessage.warning('头像过大（≤ 2MB），请压缩后再上传')
+    input.value = ''
+    return
+  }
+  avatarUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await uploadAvatar(userStore.userId, fd)
+    if (res.status === 'success' && res.data?.avatar_url) {
+      profileData.value = {
+        ...profileData.value,
+        profile: { ...(profile.value || {}), avatar_url: res.data.avatar_url },
+      }
+      ElMessage.success('头像已更新')
+    } else {
+      ElMessage.error(res.message || '头像上传失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err?.message || '头像上传失败')
+  } finally {
+    avatarUploading.value = false
+    input.value = ''  // 重置，允许重复选同一文件
+  }
+}
+
+/** 清空画像（ProfileDisplay 的「清空画像」触发）—— 二次确认后删除画像并回到「无画像」态 */
+async function onClear(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '确定要清空当前画像吗？将同时删除已保存的画像数据，此操作不可撤销。',
+      '清空画像',
+      { confirmButtonText: '确定清空', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return // 用户点了取消
+  }
+  try {
+    await deleteProfile(userStore.userId)
+    ElMessage.success('画像已清空')
+    // 重置本地状态：回到「无画像」引导态
+    profileData.value = null
+    loadState.value = 'empty'
+    isEditing.value = false
+  } catch {
+    ElMessage.warning('删除服务器画像失败，请稍后重试')
+  }
+}
+
+// 通过 provide 把清空函数注入 ProfileDisplay 子组件（子组件 inject 后直接调用）
+provide('clearProfile', onClear)
+
 /** 去建立画像 */
 function goBuild(): void {
   router.push('/resume-parser')
@@ -249,6 +314,20 @@ onMounted(() => {
   font-family: $font-heading;
   font-size: $font-size-2xl;
   font-weight: $font-weight-bold;
+  cursor: pointer;        // 点头像上传/更换
+  overflow: hidden;       // 图片按圆形裁剪
+  position: relative;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  &.uploading {
+    opacity: 0.6;
+    cursor: progress;
+  }
 }
 
 .id-main {

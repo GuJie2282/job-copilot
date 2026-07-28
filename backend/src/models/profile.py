@@ -51,6 +51,7 @@ class UserProfileModel(Base):
     email = Column(String(255), nullable=True, comment="邮箱")
     phone = Column(String(20), nullable=True, comment="电话")
     location = Column(String(255), nullable=True, comment="所在地")
+    avatar_url = Column(String(500), nullable=True, comment="头像 URL（形如 /static/avatars/{user_id}.{ext}）")
 
     # ── 标量字段：求职目标中的标量部分 ──
     location_preference = Column(String(255), nullable=True, comment="期望工作地点")

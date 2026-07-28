@@ -382,6 +382,88 @@ def parse_docx(file_path: str) -> Tuple[str, Optional[str]]:
 
 
 # ============================================================================
+# 头像提取（add-resume-avatar）：从简历文件提取证件照
+# 只返回 (image_bytes, ext)，存盘与 URL 由调用方（API 层）负责。
+# ============================================================================
+
+def _image_ext_from_magic(data: bytes) -> Optional[str]:
+    """根据文件头魔数判断图片类型，返回扩展名（jpg/png）；不认识返回 None。"""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    return None
+
+
+def extract_pdf_avatar(file_path: str) -> Optional[Tuple[bytes, str]]:
+    """
+    从 PDF 首页提取最像证件照的图片（几何启发式）。
+
+    筛选：位于页面上半部（top < 页高/2）+ 宽高比 0.7~1.3 + 边长 80~400pt；
+    按「越靠左上 + 越接近正方形」打分，取最高分一张。
+
+    Returns:
+        (image_bytes, ext) 或 None（无合适图 / 提取失败）。失败降级返回 None，不抛异常。
+    """
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            if not pdf.pages:
+                return None
+            page = pdf.pages[0]
+            page_w, page_h = page.width, page.height
+            candidates = []  # [(score, img_dict), ...]
+            for img in page.images:
+                x0, top, x1, bottom = img["x0"], img["top"], img["x1"], img["bottom"]
+                w, h = x1 - x0, bottom - top
+                if w <= 0 or h <= 0:
+                    continue
+                # 上半页（简历头像通常在顶部）
+                if top > page_h / 2:
+                    continue
+                ratio = w / h
+                # 宽高比接近正方形（证件照）
+                if not (0.7 <= ratio <= 1.3):
+                    continue
+                # 尺寸合理（排除小图标/logo，排除大背景图）
+                if not (80 <= w <= 400 and 80 <= h <= 400):
+                    continue
+                # 打分：靠上 + 靠左 + 接近正方形
+                score = (page_h / 2 - top) + (page_w - x0) + (1 - abs(ratio - 1)) * 100
+                candidates.append((score, img))
+            if not candidates:
+                return None
+            candidates.sort(key=lambda c: c[0], reverse=True)
+            best = candidates[0][1]
+            bbox = (best["x0"], best["top"], best["x1"], best["bottom"])
+            cropped = page.within_bbox(bbox).extract_image()
+            ext = _image_ext_from_magic(cropped["image_bytes"]) or cropped.get("ext") or "png"
+            return cropped["image_bytes"], ext
+    except Exception as e:
+        print(f"[WARNING] extract_pdf_avatar failed: {e}")
+        return None
+
+
+def extract_docx_avatar(file_path: str) -> Optional[Tuple[bytes, str]]:
+    """
+    从 docx 提取首个内嵌图片作为头像（python-docx 遍历 part.rels 找图片部件）。
+
+    Returns:
+        (image_bytes, ext) 或 None（无图 / 提取失败）。失败降级返回 None，不抛异常。
+    """
+    try:
+        doc = Document(file_path)
+        for rel in doc.part.rels.values():
+            if "image" in rel.reltype:  # 图片关系（RT.IMAGE）
+                blob = rel.target_part.blob
+                ext = _image_ext_from_magic(blob) or "png"
+                return blob, ext
+        return None
+    except Exception as e:
+        print(f"[WARNING] extract_docx_avatar failed: {e}")
+        return None
+
+
+# ============================================================================
 # 统一解析接口（根据文件类型自动选择解析器）
 # ============================================================================
 

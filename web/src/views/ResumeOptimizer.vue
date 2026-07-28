@@ -95,10 +95,21 @@
         <span class="spinner" />
         <p>{{ progressMessage }}</p>
       </div>
+
+      <!-- AI 思考过程（reasoning，glm-4.5 思考 token，灰色斜体可折叠） -->
+      <details v-if="loading && reasoningText" style="margin-top: 0.75rem;">
+        <summary style="cursor: pointer; color: #6b7280; font-size: 0.85rem;">🧠 AI 思考中…（可展开）</summary>
+        <pre v-auto-scroll style="margin-top: 0.5rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; color: #6b7280; font-style: italic; font-size: 0.85rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto;">{{ reasoningText }}▍</pre>
+      </details>
     </section>
 
     <!-- 生成结果 -->
     <div v-if="result" class="result">
+      <!-- 结果顶部 CTA（双 CTA：看完评估即可精修，不用滚到 refine-card） -->
+      <div v-if="result.refine_offered && result.resume_id" class="result-cta">
+        <span class="rc-hint">简历已生成，想再打磨？进入精修按反馈逐轮改写</span>
+        <button class="btn-primary" type="button" @click="goRefine(result.resume_id!)">进入精修 →</button>
+      </div>
       <section class="card">
         <h3 class="card-title">
           质量评估<span v-if="result.version" class="title-count tnum">（v{{ result.version }} · draft）</span>
@@ -135,7 +146,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { generateResume } from '@/api/resume'
+import { generateResumeStream } from '@/api/resume'
 import { matchHistory } from '@/api/jd'
 import type { MatchHistoryItem } from '@/types/jd'
 import ResumeEvalReport from '@/components/ResumeEvalReport.vue'
@@ -154,24 +165,10 @@ const jdResultId = ref<string | undefined>(undefined)
 
 const loading = ref(false)
 const progressMessage = ref('')
+const reasoningText = ref('')  // AI 思考过程（reasoning，思考区展示）
 const profileMissing = ref(false)
 const result = ref<any>(null)
-let progressTimer: ReturnType<typeof setInterval> | null = null
-
-// 分阶段进度（前端基于时间模拟，后端同步返回）
-function startProgress() {
-  const stages = ['准备画像与岗位…', '生成简历草稿…', '6 维评估中…', '迭代改进中…', '装配 HTML…', '即将完成…']
-  let i = 0
-  progressMessage.value = stages[0] ?? '生成中…'
-  progressTimer = setInterval(() => {
-    i = (i + 1) % stages.length
-    progressMessage.value = stages[i] ?? progressMessage.value
-  }, 5000)
-}
-function stopProgress() {
-  if (progressTimer) clearInterval(progressTimer)
-  progressTimer = null
-}
+// 进度由 SSE onStage 真实驱动（取代旧的定时器模拟）
 
 function formatTime(t?: string | null) {
   if (!t) return ''
@@ -208,7 +205,7 @@ function onSelectMatch() {
   }
 }
 
-async function onGenerate() {
+function onGenerate() {
   if (!targetPosition.value.trim()) {
     ElMessage.warning('请填写目标岗位')
     return
@@ -216,43 +213,49 @@ async function onGenerate() {
   loading.value = true
   profileMissing.value = false
   result.value = null
-  startProgress()
-  try {
-    // 按方式组装请求：方式 B 用 jd_result_id；方式 A 用 jd_text（可选）
-    const payload: {
-      target_position: string
-      user_id?: string
-      jd_result_id?: string
-      jd_text?: string
-    } = {
-      target_position: targetPosition.value,
-      user_id: userStore.userId,
-    }
-    if (mode.value === 'match' && jdResultId.value) {
-      payload.jd_result_id = jdResultId.value
-    } else if (mode.value === 'paste' && jdText.value.trim()) {
-      payload.jd_text = jdText.value.trim()
-    }
+  progressMessage.value = '准备画像与岗位…'
+  reasoningText.value = ''  // 思考区重置
 
-    const res = await generateResume(payload)
-    if (res.status === 'success' && res.data) {
-      result.value = res.data
+  // 按方式组装请求：方式 B 用 jd_result_id；方式 A 用 jd_text（可选）
+  const payload: {
+    target_position: string
+    user_id?: string
+    jd_result_id?: string
+    jd_text?: string
+  } = {
+    target_position: targetPosition.value,
+    user_id: userStore.userId,
+  }
+  if (mode.value === 'match' && jdResultId.value) {
+    payload.jd_result_id = jdResultId.value
+  } else if (mode.value === 'paste' && jdText.value.trim()) {
+    payload.jd_text = jdText.value.trim()
+  }
+
+  // 流式生成：onStage 真实进度 + onReasoning 思考过程 + onDone 定稿 + onError
+  // （去掉 content 打字机——简历最终由 done 一次性给出）
+  generateResumeStream(payload, {
+    onStage: (p) => { progressMessage.value = p.message },
+    onReasoning: (p) => { reasoningText.value += p.delta },
+    onDone: (d) => {
+      result.value = d
+      loading.value = false
+      progressMessage.value = ''
+      reasoningText.value = ''  // 定稿后清思考区（result 区显示简历）
       ElMessage.success('简历生成完成')
-    } else {
-      const code = (res as any).error_code || (res.data as any)?.error_code
-      if (code === 'PROFILE_MISSING') {
+    },
+    onError: (e) => {
+      loading.value = false
+      progressMessage.value = ''
+      reasoningText.value = ''
+      if (e.error_code === 'PROFILE_MISSING') {
         profileMissing.value = true
         ElMessage.warning('请先建立个人画像')
       } else {
-        ElMessage.error(res.message || '生成失败')
+        ElMessage.error(e.error_message || '生成失败')
       }
-    }
-  } catch (e: any) {
-    ElMessage.error(e?.message || '生成失败，请稍后重试')
-  } finally {
-    stopProgress()
-    loading.value = false
-  }
+    },
+  })
 }
 
 function goBuildProfile() {
@@ -599,6 +602,26 @@ onMounted(() => {
 @media (max-width: $container-md) {
   .page {
     padding: $spacing-2xl $spacing-lg;
+  }
+}
+/* 结果顶部 CTA（双 CTA：看完评估即可精修，不用滚到 refine-card） */
+.result-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-lg;
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-left: 3px solid $accent-color;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-sm;
+  padding: $spacing-md $spacing-xl;
+  margin-bottom: $spacing-lg;
+  flex-wrap: wrap;
+
+  .rc-hint {
+    font-size: $font-size-sm;
+    color: $text-secondary;
   }
 }
 </style>

@@ -18,16 +18,19 @@
 import os
 import uuid
 import tempfile
+import json
+import asyncio
+import logging
 from typing import Optional, Dict, Any
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Depends
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 # 导入服务
-from src.services.resume_parser import parse_resume, deduplicate_text
+from src.services.resume_parser import parse_resume, deduplicate_text, extract_pdf_avatar, extract_docx_avatar
 from src.services.quality_checker import check_text_quality, calculate_profile_confidence
 from src.services.llm_retry import invoke_llm_with_retry, is_retryable
 from src.services.profile_service import (
@@ -37,8 +40,28 @@ from src.services.profile_service import (
     delete_profile as delete_profile_service,
 )
 from src.core.deps import get_db
-from src.graph.config import get_structured_llm, UserProfile
-from src.graph.prompts import get_extraction_prompt
+from src.models.profile import UserProfileModel
+from src.graph.config import get_structured_llm, get_llm, UserProfile
+from src.graph.prompts import get_extraction_prompt, get_section_extraction_prompt
+from src.core.sse import (
+    sse,
+    sse_keepalive,
+    STAGE,
+    SEGMENT,
+    REASONING,
+    DONE,
+    ERROR,
+    STREAM_HEADERS,
+    STREAM_MEDIA_TYPE,
+)
+from src.services.profile_extractor import (
+    _extract_json_loose,
+    _merge_sections,
+    SECTION_ORDER,
+    SECTION_LABEL,
+    _SECTION_DEFAULT,
+)
+from src.services.llm_reasoning import stream_chat_with_reasoning
 
 
 # ============================================================================
@@ -126,56 +149,21 @@ def _extract_profile_with_retry(text: str, quality_score: float, max_retries: in
     Raises:
         最后一次异常（所有重试失败后）
     """
-    import json
-    import re
     import time
     import logging
-    from src.graph.config import get_llm
-    from src.graph.prompts import get_json_extraction_prompt
+    from src.services.profile_extractor import extract_profile_sectioned
 
     logger = logging.getLogger(__name__)
-    llm = get_llm(temperature=0.0, tier="strong")  # 简历解析：主力档（质量敏感）
     last_error = None
 
+    # 分段提取（basic/education/work/project/skills 各一段）：段级容错 + 嵌套结构，
+    # 替代旧的单次扁平提取（治超时 + 治字段错位）。详见 profile_extractor。
     for attempt in range(max_retries + 1):
         try:
-            prompt = get_json_extraction_prompt(text, quality_score)
-            # 重试时强化 JSON 格式要求（LLM 偶发返回非 JSON 时尤其有效）
-            if attempt > 0:
-                prompt = (
-                    "上次提取失败。请严格输出合法 JSON，必须包裹在 ```json 代码块中，"
-                    "不要输出任何解释或多余文字。\n\n" + prompt
-                )
-
-            # 调用 LLM（API 异常会被下面的 except 捕获并重试）
-            response = llm.invoke(prompt)
-            response_text = response.content
-
-            # 提取 JSON（处理 markdown 代码块包裹的情况）
-            json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-            json_text = json_match.group(1) if json_match else response_text.strip()
-
-            # 解析 JSON：先标准解析，失败则用 json_repair 容错修复。
-            # glm-4-flash 等弱模型输出「含长文本详情」的大 JSON 时，偶发缺逗号 / 引号转义错，
-            # json_repair 能修复这类轻微格式错误，避免直接判失败、反复重试浪费时间。
-            try:
-                profile_dict = json.loads(json_text)
-            except json.JSONDecodeError as je:
-                try:
-                    from json_repair import repair_json
-                    profile_dict = repair_json(json_text, return_objects=True)
-                    logger.warning(
-                        f"标准 JSON 解析失败，已用 json_repair 容错修复：{je}。"
-                        f"LLM 原始输出前 300 字：{response_text[:300]}"
-                    )
-                except Exception:
-                    # json_repair 也修不了 → 抛原错误，触发外层重试
-                    raise je
-
-            # Pydantic 校验
+            profile_dict = extract_profile_sectioned(text, quality_score)
+            # Pydantic 校验（嵌套 UserProfile）
             profile = UserProfile(**profile_dict).model_dump()
             return profile
-
         except Exception as e:
             last_error = e
             # 不可重试错误（认证、参数等）→ 立即抛出
@@ -252,6 +240,26 @@ async def parse_resume_file(
         # 4. 解析文件
         result, error = parse_resume(file_path)
 
+        # 4.5 提取头像（add-resume-avatar）：删临时文件前按文件类型提图；
+        # 几何启发式选首页最像证件照的图，失败/无图降级跳过，不阻塞解析。
+        avatar_url = None
+        if user_id and not error:
+            try:
+                avatar_bytes_ext = None
+                if file_ext == '.pdf':
+                    avatar_bytes_ext = extract_pdf_avatar(file_path)
+                elif file_ext == '.docx':
+                    avatar_bytes_ext = extract_docx_avatar(file_path)
+                if avatar_bytes_ext:
+                    a_bytes, a_ext = avatar_bytes_ext
+                    os.makedirs(AVATAR_DIR, exist_ok=True)
+                    a_path = os.path.join(AVATAR_DIR, f"{user_id}.{a_ext}")
+                    with open(a_path, "wb") as af:
+                        af.write(a_bytes)
+                    avatar_url = f"/static/avatars/{user_id}.{a_ext}"
+            except Exception as ae:
+                print(f"[WARNING] avatar extraction failed: {ae}")
+
         # 清理临时文件
         try:
             os.remove(file_path)
@@ -275,6 +283,10 @@ async def parse_resume_file(
         # 8. LLM 提取画像（带重试：处理 API 异常 + JSON 解析失败）
         try:
             profile = _extract_profile_with_retry(text, quality_score)
+
+            # 注入解析提取到的头像 URL（若有）——前端拿到 profile 后随 update-profile 落库
+            if avatar_url:
+                profile["avatar_url"] = avatar_url
 
             # 9. 计算置信度
             confidence = calculate_profile_confidence(profile, text)
@@ -399,6 +411,92 @@ async def parse_resume_text(request: ParseTextRequest):
 
 
 # ============================================================================
+# API 2.5: 文本流式解析（POST /api/resume/parse-stream）—— SSE 分段提取
+# ============================================================================
+
+class ParseStreamRequest(BaseModel):
+    """文本流式解析请求"""
+    text: str = Field(..., description="简历文本", min_length=50)
+    user_id: Optional[str] = Field(None, description="用户 ID")
+
+
+@resume_router.post("/parse-stream")
+async def parse_resume_text_stream(request: ParseStreamRequest):
+    """
+    文本流式解析（SSE 分段提取，对应 change add-streaming-pipeline 决策 5/6）：
+    去重 → 质检 → 逐段 LLM 提取（basic/education/work/project/skills）。
+
+    每段完成发 segment 事件（画像逐段成型），全部完成发 done；失败发 error。
+    段内用 llm.astream 增量产出（连接持续活跃），并每若干 token 下发心跳保活。
+
+    事件流（text/event-stream）：
+      event: stage    —— 阶段进度 {message, node?}
+      event: segment  —— 分段结果 {section, data}
+      event: done     —— 完成 {status, quality_score, profile, confidence, text, warnings?}
+      event: error    —— 失败 {error_code, error_message}
+    """
+    _logger = logging.getLogger(__name__)
+
+    async def event_stream():
+        try:
+            text = deduplicate_text(request.text or "")
+            if len(text.strip()) < 50:
+                yield sse(ERROR, {
+                    "error_code": "TEXT_TOO_SHORT",
+                    "error_message": "文本过短，请提供完整的简历文本（至少 50 字符）。",
+                })
+                return
+
+            yield sse(STAGE, {"message": "文本质量检测…"})
+            quality_score, warnings = check_text_quality(text)
+
+            # 分段提取（glm-4.5 reasoning）：每段独立 stream_chat_with_reasoning
+            # —— reasoning 发思考事件（前端思考区），content 收集后整段解析为 segment
+            partial: Dict[str, Any] = {}
+            for section in SECTION_ORDER:
+                yield sse(STAGE, {"message": SECTION_LABEL[section], "node": section})
+                prompt = get_section_extraction_prompt(text, section)
+                content_parts: list = []
+                async for kind, delta in stream_chat_with_reasoning(prompt, temperature=0.0, timeout=120.0):
+                    if kind == "reasoning":
+                        yield sse(REASONING, {"delta": delta})
+                    else:
+                        content_parts.append(delta)
+                data = _extract_json_loose("".join(content_parts))
+                if data is None:
+                    data = json.loads(json.dumps(_SECTION_DEFAULT[section]))  # 深拷贝默认值，容错
+                if section == "basic" and isinstance(data, dict):
+                    for k in _SECTION_DEFAULT["basic"]:
+                        data.setdefault(k, None)
+                partial[section] = data
+                yield sse(SEGMENT, {"section": section, "data": data})
+
+            profile = _merge_sections(partial)
+            confidence = calculate_profile_confidence(profile, text)
+            status = "success" if quality_score >= 0.8 else "warning"
+            yield sse(DONE, {
+                "status": status,
+                "quality_score": quality_score,
+                "warnings": warnings if quality_score < 0.8 else None,
+                "text": text,
+                "profile": profile,
+                "confidence": confidence,
+            })
+        except Exception as e:
+            _logger.exception("parse-stream 流式解析异常")
+            yield sse(ERROR, {
+                "error_code": "PARSE_FAILED",
+                "error_message": f"解析失败：{e}",
+            })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type=STREAM_MEDIA_TYPE,
+        headers=STREAM_HEADERS,
+    )
+
+
+# ============================================================================
 # API 3: LLM 提取（POST /api/resume/extract）
 # ============================================================================
 
@@ -478,6 +576,63 @@ async def update_profile(
             message=f"画像保存失败：{str(e)}",
             data=None
         )
+
+
+# ============================================================================
+# API 4.5: 头像上传（POST /api/resume/avatar）— add-resume-avatar
+# ============================================================================
+
+# 头像存储目录（与 main.py 的 StaticFiles mount 一致：backend/data/avatars）
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+AVATAR_DIR = os.path.join(_BACKEND_ROOT, "data", "avatars")
+AVATAR_MAX_SIZE = 2 * 1024 * 1024  # 2MB（不引入 Pillow 做压缩，靠上传大小限制；压缩留后续）
+
+
+def _check_image_magic(data: bytes) -> Optional[str]:
+    """根据文件头魔数判断图片类型，返回扩展名（jpg/png）；不合法返回 None。
+    不只看扩展名/Content-Type，防止伪装的可执行文件上传。"""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    return None
+
+
+@resume_router.post("/avatar")
+async def upload_avatar(
+    user_id: str = Query(..., description="用户 ID"),
+    file: UploadFile = File(..., description="头像图片（jpeg/png，≤2MB）"),
+    db: Session = Depends(get_db),
+):
+    """
+    上传用户头像（存文件系统 + URL 入库）。
+
+    直接写 user_profiles.avatar_url——不走 save_profile，否则会整体覆盖 detail_json 丢画像明细。
+    """
+    data = await file.read()
+    if len(data) > AVATAR_MAX_SIZE:
+        return APIResponse(status="error", message="头像过大（≤ 2MB）", data={"error_code": "TOO_LARGE"})
+    ext = _check_image_magic(data)
+    if not ext:
+        return APIResponse(status="error", message="仅支持 jpeg/png 图片", data={"error_code": "BAD_TYPE"})
+
+    # 画像须存在（头像属于画像）
+    row = db.query(UserProfileModel).filter(UserProfileModel.user_id == user_id).first()
+    if row is None:
+        return APIResponse(status="error", message="画像不存在，请先建立画像", data={"error_code": "NO_PROFILE"})
+
+    # 原子写：临时文件 + os.replace，防并发覆盖写坏
+    os.makedirs(AVATAR_DIR, exist_ok=True)
+    final_path = os.path.join(AVATAR_DIR, f"{user_id}.{ext}")
+    tmp_path = final_path + ".tmp"
+    with open(tmp_path, "wb") as f:
+        f.write(data)
+    os.replace(tmp_path, final_path)
+
+    url = f"/static/avatars/{user_id}.{ext}"
+    row.avatar_url = url
+    db.commit()
+    return APIResponse(status="success", message="头像已更新", data={"avatar_url": url})
 
 
 # ============================================================================
