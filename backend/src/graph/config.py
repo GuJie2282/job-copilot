@@ -179,11 +179,39 @@ def get_structured_llm(
 # 用户画像 JSON Schema
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# 画像嵌套子模型（教育/工作/项目各字段绑死在同一实体，杜绝扁平平行数组错位）
+# ----------------------------------------------------------------------------
+
+class EducationItem(BaseModel):
+    """单段教育经历：学校/学历/专业/毕业年份绑死在同一学校实体"""
+    school: Optional[str] = None
+    degree: Optional[str] = None
+    major: Optional[str] = None
+    graduation_year: Optional[str] = None
+
+
+class WorkExperienceItem(BaseModel):
+    """单段工作/实习经历：公司/职位/时间/职责详情绑死在同一经历实体"""
+    company: Optional[str] = None
+    position: Optional[str] = None
+    duration: Optional[str] = None
+    description: Optional[str] = None  # 职责与成果详情（保留原文细节）
+
+
+class ProjectItem(BaseModel):
+    """单个项目：名称/角色/详情绑死在同一项目实体"""
+    name: Optional[str] = None
+    role: Optional[str] = None
+    description: Optional[str] = None  # 项目内容、职责与成果（保留原文细节）
+
+
 class UserProfile(BaseModel):
     """
     用户画像的数据模型（用于结构化输出）
 
-    用途：约束 LLM 输出格式，确保返回结构化数据
+    结构：教育/工作/项目用「嵌套对象数组」（每个实体的字段绑死在一起），
+    杜绝旧「扁平平行数组靠下标对齐」导致的字段错位（如项目名张冠李戴）。
     """
 
     # 基础信息
@@ -191,33 +219,17 @@ class UserProfile(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     location: Optional[str] = None
+    self_summary: Optional[str] = None  # 个人总结 / 自我评价（保留原文）
 
-    # 教育背景
-    schools: Optional[list[str]] = None
-    degrees: Optional[list[str]] = None
-    majors: Optional[list[str]] = None
-    graduation_years: Optional[list[str]] = None
+    # 教育/工作/项目（嵌套对象数组）
+    education: Optional[list[EducationItem]] = None
+    work_experience: Optional[list[WorkExperienceItem]] = None
+    projects: Optional[list[ProjectItem]] = None
 
-    # 工作经历
-    companies: Optional[list[str]] = None
-    positions: Optional[list[str]] = None
-    durations: Optional[list[str]] = None
-    # 每段工作/实习经历的职责与成果详情（保留原文细节），与 companies 同序对应
-    work_descriptions: Optional[list[str]] = None
-
-    # 技能
+    # 技能（扁平数组，天然无错位问题）
     technical_skills: Optional[list[str]] = None
     soft_skills: Optional[list[str]] = None
     languages: Optional[list[str]] = None
-
-    # 项目经验
-    project_names: Optional[list[str]] = None
-    project_roles: Optional[list[str]] = None
-    # 每个项目的内容、职责与成果详情（保留原文细节），与 project_names 同序对应
-    project_descriptions: Optional[list[str]] = None
-
-    # 个人总结与荣誉
-    self_summary: Optional[str] = None  # 个人总结 / 自我评价（保留原文）
     achievements: Optional[list[str]] = None  # 荣誉、奖项、证书
 
     # 求职目标

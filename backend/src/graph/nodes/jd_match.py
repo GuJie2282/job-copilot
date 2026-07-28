@@ -16,8 +16,11 @@ import logging
 from typing import Dict, Any
 
 from langchain_core.messages import AIMessage
+from langgraph.types import StreamWriter
 
-from src.services.jd_parser import parse_jd
+from src.services.jd_parser import parse_jd, _extract_json, JobProfile
+from src.services.llm_reasoning import stream_chat_with_reasoning
+from src.graph.prompts import get_jd_parsing_prompt
 from src.services.matcher import calculate_match
 from src.services.gap_analyzer import build_gap_skeleton
 from src.services.profile_service import get_profile, get_profile_confidence
@@ -79,11 +82,27 @@ def jd_quality_check_node(state: Dict[str, Any]) -> Dict[str, Any]:
 # 3. jd_parsing_node：LLM 解析 JD → job_profile
 # ============================================================================
 
-def jd_parsing_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """调用 jd_parser 把 JD 解析为四分类要求画像。"""
+async def jd_parsing_node(state: Dict[str, Any], writer: StreamWriter) -> Dict[str, Any]:
+    """
+    调用 LLM 把 JD 解析为四分类要求画像（glm-4.5 reasoning）。
+    reasoning 经 writer 推 custom event（前端思考区），content 收集后解析为 job_profile。
+    """
     jd_text = state.get("jd_text", "")
+    if not jd_text or not jd_text.strip():
+        return {
+            "match_status": "error",
+            "error": "JD 文本为空，无法解析",
+            "messages": [AIMessage(content="❌ JD 文本为空，无法解析")],
+        }
     try:
-        job_profile = parse_jd(jd_text)
+        prompt = get_jd_parsing_prompt(jd_text)
+        content_parts: list = []
+        async for kind, delta in stream_chat_with_reasoning(prompt, temperature=0.0, timeout=120.0):
+            writer({"type": "reasoning" if kind == "reasoning" else "token", "delta": delta})
+            if kind == "content":
+                content_parts.append(delta)
+        data = _extract_json("".join(content_parts))
+        job_profile = JobProfile(**data).model_dump()
         n = sum(
             len(job_profile.get(c, []))
             for c in ("hard_skills", "soft_skills", "implicit_preferences", "red_lines")

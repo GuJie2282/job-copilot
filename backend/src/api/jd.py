@@ -10,7 +10,6 @@ JD 匹配 API 路由
 日期：2026-07-14
 """
 
-import json
 import logging
 import asyncio
 from typing import Optional, Dict, Any
@@ -21,6 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.core.deps import get_db
+from src.core.sse import sse, REASONING, STREAM_MEDIA_TYPE, STREAM_HEADERS
 from src.models.profile import JdMatchResultModel
 from src.graph.graph import create_graph
 from src.graph.state import create_initial_state
@@ -30,15 +30,6 @@ from src.services.profile_service import get_profile
 logger = logging.getLogger(__name__)
 
 jd_router = APIRouter()
-
-
-# ============================================================================
-# SSE 工具
-# ============================================================================
-
-def _sse(event: str, data: Dict[str, Any]) -> str:
-    """组装一条 SSE 事件（event 行 + data 行，以空行结束）。"""
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def _last_msg(update: Dict[str, Any]) -> Optional[str]:
@@ -72,19 +63,20 @@ class ApiResponse(BaseModel):
 # ============================================================================
 
 @jd_router.post("/match")
-async def match_jd(request: MatchRequest):
+async def match_jd(request: MatchRequest, db: Session = Depends(get_db)):
     """
     提交 JD 文本，流式执行匹配（SSE 阶段推送）。
 
     评分链：JD 校验 → 结构化解析 → 加载画像 → 匹配计算 → 持久化（分数秒出）。
-    通过 SSE 持续下发事件，避免长请求超时；Gap 的 LLM 增补（隐性判断 + 建议）
-    走独立的 /api/jd/{id}/enrich 端点 lazy 加载。
+    通过 SSE 持续下发事件，避免长请求超时。done（评分完成 + 规则 Gap 骨架）后**不关流**，
+    继续在同一流内执行 Gap 增补（隐性偏好判断 + 建议生成），下发 enriched 后才关闭。
 
     事件流（text/event-stream）：
-      event: stage  —— 阶段进度（{message, node}）
-      event: score  —— 分数（overall_score / dimension_scores / level / redline_hit / result_id）
-      event: done   —— 主链结束（{result_id, job_profile, gaps（规则骨架）}）
-      event: error  —— 失败（{error_code, error_message}），随后关闭流
+      event: stage     —— 阶段进度（{message, node}）
+      event: score     —— 分数（overall_score / dimension_scores / level / redline_hit / result_id）
+      event: done      —— 评分完成（{result_id, job_profile, gaps（规则骨架）}；不关流）
+      event: enriched  —— 增补完成（{gaps（含隐性判断 + 建议）, degraded?}；关流）
+      event: error     —— 失败（{error_code, error_message}），随后关闭流
     """
     user_id = request.user_id
     if not user_id:
@@ -113,9 +105,28 @@ async def match_jd(request: MatchRequest):
         }
         latest: Dict[str, Any] = {}  # 累积各节点 update（astream updates 每次只给 delta）
 
+        # done 后供增补链使用
+        result_id = None
+        gaps_skeleton: list = []
+        job_profile: Dict[str, Any] = {}
+
         try:
-            async for chunk in graph.astream(state, config, stream_mode="updates"):
-                for node, update in (chunk or {}).items():
+            async for chunk in graph.astream(state, config, stream_mode=["updates", "custom"]):
+                # 多 stream_mode：chunk 为 (mode, data) 元组（0.2.x）；防御 dict
+                if isinstance(chunk, tuple) and len(chunk) == 2:
+                    mode, data = chunk
+                elif isinstance(chunk, dict) and len(chunk) == 1:
+                    mode, data = next(iter(chunk.items()))
+                else:
+                    continue
+                # custom 流：jd_parsing_node 经 writer 推 reasoning（AI 思考）
+                if mode == "custom":
+                    if isinstance(data, dict) and data.get("type") == "reasoning":
+                        yield sse(REASONING, {"delta": data.get("delta", "")})
+                    continue
+                if mode != "updates":
+                    continue
+                for node, update in (data or {}).items():
                     if not isinstance(update, dict):
                         continue
                     latest.update(update)
@@ -124,36 +135,62 @@ async def match_jd(request: MatchRequest):
                     # 失败分支 → error 事件后关闭
                     if mstatus in err_code:
                         msg = update.get("error") or _last_msg(update) or default_msg[mstatus]
-                        yield _sse("error", {"error_code": err_code[mstatus], "error_message": msg})
+                        yield sse("error", {"error_code": err_code[mstatus], "error_message": msg})
                         return
 
                     # 阶段进度
                     if node in stage_msg:
-                        yield _sse("stage", {"message": stage_msg[node], "node": node})
+                        yield sse("stage", {"message": stage_msg[node], "node": node})
 
-                    # 评分链终点：先 score（分数）后 done（骨架）
+                    # 评分链终点：先 score（分数）后 done（骨架），记录变量供增补链用
                     if node == "report_format" and mstatus == "success":
+                        result_id = update.get("result_id")
+                        job_profile = latest.get("job_profile", {}) or {}
+                        gaps_skeleton = update.get("gaps", []) or []
                         mr = latest.get("match_result", {}) or {}
-                        yield _sse("score", {
+                        yield sse("score", {
                             "overall_score": mr.get("overall_score"),
                             "level": mr.get("level"),
                             "dimension_scores": mr.get("dimension_scores", {}),
                             "redline_hit": mr.get("redline_hit"),
-                            "result_id": update.get("result_id"),
+                            "result_id": result_id,
                         })
-                        yield _sse("done", {
-                            "result_id": update.get("result_id"),
-                            "job_profile": latest.get("job_profile", {}),
-                            "gaps": update.get("gaps", []),
+                        yield sse("done", {
+                            "result_id": result_id,
+                            "job_profile": job_profile,
+                            "gaps": gaps_skeleton,
                         })
+
+            # ===== 评分链完成，继续增补链（done 后不关流，对应 change 决策 9）=====
+            if result_id and gaps_skeleton:
+                yield sse("stage", {"message": "正在分析隐性偏好与生成建议…", "node": "enrich"})
+                user_profile = get_profile(db, user_id)
+                if not user_profile:
+                    # 无画像降级：保留规则骨架
+                    yield sse("enriched", {"gaps": gaps_skeleton, "degraded": True})
+                    return
+                try:
+                    # enrich 两段 LLM 丢线程池，不阻塞事件循环
+                    enriched = await asyncio.to_thread(
+                        enrich_gaps, gaps_skeleton, job_profile, user_profile
+                    )
+                    # 回填持久化（UPDATE 同一行 gaps_json）
+                    row = db.query(JdMatchResultModel).filter(JdMatchResultModel.id == result_id).first()
+                    if row:
+                        row.gaps_json = enriched
+                        db.commit()
+                    yield sse("enriched", {"gaps": enriched})
+                except Exception as ee:
+                    logger.exception("Gap 增补失败，降级为规则骨架")
+                    yield sse("enriched", {"gaps": gaps_skeleton, "degraded": True})
         except Exception as e:
             logger.exception("JD 匹配流式处理异常")
-            yield _sse("error", {"error_code": "LLM_FAILED", "error_message": f"匹配失败：{e}"})
+            yield sse("error", {"error_code": "LLM_FAILED", "error_message": f"匹配失败：{e}"})
 
     return StreamingResponse(
         event_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        media_type=STREAM_MEDIA_TYPE,
+        headers=STREAM_HEADERS,
     )
 
 

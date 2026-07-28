@@ -41,10 +41,21 @@
         <span class="spinner" />
         <p>{{ progressMessage }}</p>
       </div>
+      <!-- AI 思考过程（reasoning，灰色斜体可折叠） -->
+      <details v-if="isLoading && reasoningText" style="margin-top: 0.75rem;">
+        <summary style="cursor: pointer; color: #6b7280; font-size: 0.85rem;">🧠 AI 思考中…（可展开）</summary>
+        <pre v-auto-scroll style="margin-top: 0.5rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; color: #6b7280; font-style: italic; font-size: 0.85rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto;">{{ reasoningText }}▍</pre>
+      </details>
     </section>
 
     <!-- 匹配结果 -->
     <div v-if="result" class="result">
+      <!-- 结果顶部 CTA（双 CTA：看完仪表即可生成，不用滚到差距清单） -->
+      <div v-if="result.result_id" class="result-cta">
+        <span class="rc-hint">匹配完成，据此生成针对性简历</span>
+        <button class="btn-primary" type="button" @click="goGenerate">据此生成简历 →</button>
+      </div>
+
       <!-- SIGNATURE：匹配度拆解仪表（总分 + 四维度条形，编码"强在哪/弱在哪"） -->
       <section class="card score-card">
         <div class="overall">
@@ -115,7 +126,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { matchJd, enrichGaps, matchHistory, matchDetail } from '@/api/jd'
+import { matchJd, matchHistory, matchDetail } from '@/api/jd'
 import type { MatchResult, MatchHistoryItem } from '@/types/jd'
 import GapList from '@/components/GapList.vue'
 
@@ -125,6 +136,7 @@ const userStore = useUserStore()
 const jdText = ref('')
 const isLoading = ref(false)             // 主链+增补全程 true（textarea 禁用、按钮 loading）
 const progressMessage = ref('')          // 由 SSE stage 事件驱动的真实进度（取代旧定时器模拟）
+const reasoningText = ref('')  // AI 思考过程（reasoning，思考区展示）
 const result = ref<MatchResult | null>(null)
 const resultId = ref<string | null>(null)
 const profileMissing = ref(false)
@@ -198,6 +210,7 @@ function onMatch() {
     {
       // 真实进度（取代旧的定时器模拟）
       onStage: (p) => { progressMessage.value = p.message },
+      onReasoning: (p) => { reasoningText.value += p.delta },
       // 分数秒出：先把 hero（总分 + 四维度）渲染出来
       onScore: (s) => {
         result.value = {
@@ -209,7 +222,7 @@ function onMatch() {
         }
         resultId.value = s.result_id || null
       },
-      // 规则 Gap 骨架到位（隐性 Gap 显示"分析中…"）
+      // 评分完成 + 规则 Gap 骨架（流内继续增补，不关流）
       onDone: (d) => {
         result.value = {
           ...(result.value || {}),
@@ -219,9 +232,20 @@ function onMatch() {
         }
         resultId.value = d.result_id || resultId.value
         progressMessage.value = '正在补充差距建议…'
-        ElMessage.success('匹配完成，正在补充差距建议…')
-        loadHistory()        // 分数已出，先刷新历史
-        loadEnrichments()    // 触发增补链
+        loadHistory()  // 分数已出，先刷新历史（增补由流内 enriched 事件完成）
+      },
+      // 增补完成：回填最终 Gap 清单（含隐性判断 + 建议），结束 loading
+      onEnriched: (e) => {
+        if (result.value) {
+          result.value = { ...result.value, gaps: e.gaps }
+        }
+        isLoading.value = false
+        progressMessage.value = ''
+        if (e.degraded) {
+          ElMessage.warning('部分差距建议补充失败，已展示模板建议')
+        } else {
+          ElMessage.success('差距建议已补充')
+        }
       },
       onError: (e) => {
         isLoading.value = false
@@ -234,26 +258,6 @@ function onMatch() {
       },
     },
   )
-}
-
-// 增补链：补全隐性判断 + Gap 建议，回填到骨架
-async function loadEnrichments() {
-  if (!resultId.value) {
-    isLoading.value = false
-    return
-  }
-  try {
-    const res = await enrichGaps(resultId.value, { user_id: userStore.userId })
-    if (res.status === 'success' && res.data && result.value) {
-      result.value = { ...result.value, gaps: res.data.gaps }
-      ElMessage.success('差距建议已补充')
-    }
-  } catch {
-    // 增补失败：保留规则骨架 + 模板建议，不阻断展示
-    ElMessage.warning('部分差距建议补充失败，已展示模板建议')
-  } finally {
-    isLoading.value = false
-  }
 }
 
 // 组件卸载时取消进行中的流（避免离开页面后回调报错）
@@ -496,6 +500,27 @@ onMounted(() => {
 /* 结果区 */
 .result {
   margin-top: $spacing-xl;
+}
+
+/* 结果顶部 CTA（双 CTA：看完仪表即可生成，不用滚到差距清单） */
+.result-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-lg;
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-left: 3px solid $accent-color;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-sm;
+  padding: $spacing-md $spacing-xl;
+  margin-bottom: $spacing-lg;
+  flex-wrap: wrap;
+
+  .rc-hint {
+    font-size: $font-size-sm;
+    color: $text-secondary;
+  }
 }
 
 /* SIGNATURE：匹配度拆解仪表 —— 总分 + 四维度条形 */

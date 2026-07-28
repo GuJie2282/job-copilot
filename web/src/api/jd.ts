@@ -10,12 +10,14 @@
  * 调用方按后端实际字段（status / message / data）访问。
  */
 import client from './client'
+import { openSseStream } from '@/utils/sse'
 
 /**
  * SSE 事件回调（match 端点流式输出）
  */
 export interface MatchStreamHandlers {
   onStage?: (p: { message: string; node?: string }) => void
+  onReasoning?: (p: { delta: string }) => void
   onScore?: (p: {
     overall_score?: number
     level?: string
@@ -24,6 +26,8 @@ export interface MatchStreamHandlers {
     result_id?: string
   }) => void
   onDone?: (p: { result_id?: string; job_profile?: any; gaps?: any[] }) => void
+  /** 增补完成（Gap 含隐性判断 + 建议；degraded=true 表示降级为模板建议） */
+  onEnriched?: (p: { gaps: any[]; degraded?: boolean }) => void
   onError?: (p: { error_code: string; error_message: string }) => void
 }
 
@@ -38,92 +42,9 @@ export function matchJd(
   data: { jd_text: string; user_id?: string },
   handlers: MatchStreamHandlers,
 ): AbortController {
-  const controller = new AbortController()
-
-  void (async () => {
-    // SSE 直连后端（VITE_STREAM_BASE_URL），绕开 vite proxy——proxy 不流式转发 text/event-stream。
-    // 未配置时回退到普通 API base（走 proxy，流式可能不工作但至少不报错）。
-    const base = import.meta.env['VITE_STREAM_BASE_URL'] || import.meta.env.VITE_API_BASE_URL || ''
-    const token = localStorage.getItem('token')
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (token) headers['Authorization'] = `Bearer ${token}`
-
-    let resp: Response
-    try {
-      resp = await fetch(`${base}/jd/match`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(data),
-        signal: controller.signal,
-      })
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return
-      handlers.onError?.({ error_code: 'NETWORK', error_message: e?.message || '网络错误' })
-      return
-    }
-
-    if (!resp.ok || !resp.body) {
-      let message = `请求失败（${resp.status}）`
-      try {
-        const j = await resp.json()
-        message = j?.message || message
-      } catch { /* 非 JSON 错误体，保留默认文案 */ }
-      handlers.onError?.({ error_code: 'HTTP_' + resp.status, error_message: message })
-      return
-    }
-
-    // 手写 SSE 解析：流按 \n\n 切事件块，每块解析 event:/data: 行
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    try {
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        let sep = buffer.indexOf('\n\n')
-        while (sep !== -1) {
-          const evt = parseSse(buffer.slice(0, sep))
-          buffer = buffer.slice(sep + 2)
-          if (evt) dispatch(evt, handlers)
-          sep = buffer.indexOf('\n\n')
-        }
-      }
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        handlers.onError?.({ error_code: 'STREAM', error_message: e?.message || '流读取中断' })
-      }
-    }
-  })()
-
-  return controller
-}
-
-/** 解析单个 SSE 事件块（event:/data: 行） */
-function parseSse(raw: string): { event: string; data: any } | null {
-  let event = 'message'
-  let dataStr = ''
-  for (const line of raw.split('\n')) {
-    if (line.startsWith('event:')) event = line.slice(6).trim()
-    else if (line.startsWith('data:')) dataStr += line.slice(5).trim()
-  }
-  if (!dataStr) return null
-  try {
-    return { event, data: JSON.parse(dataStr) }
-  } catch {
-    return null
-  }
-}
-
-/** 把 SSE 事件分发到对应回调 */
-function dispatch(evt: { event: string; data: any }, h: MatchStreamHandlers) {
-  switch (evt.event) {
-    case 'stage': h.onStage?.(evt.data); break
-    case 'score': h.onScore?.(evt.data); break
-    case 'done': h.onDone?.(evt.data); break
-    case 'error': h.onError?.(evt.data); break
-    default: break
-  }
+  // 复用公共 SSE 封装（fetch + ReadableStream 手写解析），逻辑见 src/utils/sse.ts。
+  // 持续接收事件即保持连接活跃，不再有同步请求的超时墙。
+  return openSseStream('/jd/match', data, handlers)
 }
 
 /**
