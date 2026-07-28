@@ -2,12 +2,14 @@
 追问质量 + 耗时验证（add-mock-interview 阶段 9.1 / 9.5.2）
 =============================================================
 
-验证 design 决策 5「按图索骥」是否真的可控：
-  1. 信号差检测准确性：充分回答→命中信号多/不追问；空洞/跑题→缺失信号/触发追问
-  2. 追问上限：probing_limit 到顶后，即使缺信号也换题（不无限深挖）
-  3. 追问基于地图：miss_probe_map 把缺失信号映射到 probing_point（非自由发挥）
-  4. 单轮评估耗时 < 15s（演示就绪硬指标）
+验证评估质量 + 节奏决策（evolve-interview-pacing 后）：
+  1. 信号差检测准确性：充分回答→命中信号多/倾向不追问；空洞/跑题→缺失信号/倾向追问
+  2. LLM 节奏 action 合理：充分回答倾向 next；空洞回答倾向 probe
+  3. 追问护栏：单题追问达上限(5)时，action=probe 被纠正为换题（护栏纯逻辑详见 test_pacing.py）
+  4. 追问措辞合并产出：action=probe 时 next_probe_followup 非空
+  5. 单轮评估耗时 < 15s（演示就绪硬指标）
 
+注：节奏决策的边界/护栏纯逻辑测试在 test_pacing.py；本测试聚焦 LLM 评估质量 + 耗时，
 直接测 evaluator 的 _llm_evaluate + _decide（单元级，快），不跑整图。
 
 作者：求职 Copilot 项目
@@ -67,10 +69,10 @@ def run():
         dt = time.time() - t0
         timings.append(dt)
 
-        # probe_count=0：有空问额度时该不该追
+        # probe_count=0：护栏不拦，看 LLM 的 action（evolve-interview-pacing 后由 LLM 自主决策）
         action_0 = _decide(mock_state(0), ev)
-        # probe_count=3：到上限后即使缺信号也换题
-        action_max = _decide(mock_state(3), ev)
+        # probe_count=5：达单题追问护栏上限，若 action=probe 应被纠正为换题
+        action_max = _decide(mock_state(5), ev)
 
         results[label] = (ev, action_0, action_max)
         print(f"【{label}】耗时 {dt:.1f}s")
@@ -78,7 +80,7 @@ def run():
         print(f"  命中信号：{ev['hit_signals']}")
         print(f"  缺失信号：{ev['miss_signals']}")
         print(f"  追问地图：{ev['miss_probe_map']}")
-        print(f"  评分：{ev['score']} | 追问额度0→{action_0} | 追问额度满→{action_max}\n")
+        print(f"  action：{ev.get('action')} | 评分：{ev['score']} | 追问额度0→{action_0} | 单题追问达上限→{action_max}\n")
 
     # ============ 质量断言 ============
     print("=" * 70)
@@ -92,7 +94,7 @@ def run():
         ("充分回答命中信号数 ≥ 空洞回答", len(full_ev["hit_signals"]) >= len(empty_ev["hit_signals"])),
         ("充分回答（额度0）不应追问", results["充分（命中全部信号）"][1] != "probe"),
         ("空洞回答（额度0）应触发追问", results["空洞（几乎无信号）"][1] == "probe"),
-        ("追问上限：额度满时不追问（换题/结束）", all(results[l][2] != "probe" for l in ANSWERS)),
+        ("追问护栏：单题追问达上限(5)时不 probe（换题/收尾）", all(results[l][2] != "probe" for l in ANSWERS)),
         ("追问基于地图：空洞回答的 miss_probe_map 非空", bool(empty_ev["miss_probe_map"])),
         ("追问措辞合并产出：空洞回答的 next_probe_followup 非空", bool(empty_ev.get("next_probe_followup"))),
         ("单轮评估耗时 < 15s（演示就绪硬上限）", max(timings) < 15),

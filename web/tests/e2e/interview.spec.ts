@@ -38,26 +38,28 @@ test('模拟面试完整流程：登录 → 配置 → 答题 → 复盘', async
   // 第一道题（面试官消息）出现
   await expect(page.locator('.msg.interviewer').first()).toBeVisible({ timeout: 30_000 })
 
-  // ── 4. 答题循环：short 档位 3 题 + 可能追问，循环直到跳复盘 ──
+  // ── 4. 答题循环：节奏由 LLM 自主（evolve-interview-pacing），轮数不固定 ──
+  //    可能提前结束（<3 题）、可能连追；护栏 max_rounds = 题量×(1+5) = 18 轮上限。
+  //    循环到跳复盘即止；上限 24 覆盖护栏天花板 + buffer。
   const answers = [
     '我在字节做 feed 推荐，用 A/B 测试优化召回策略，协调算法和工程团队，DAU 提升 15%。',
     '我用 SQL 做漏斗分析定位流失节点，针对性优化后转化率提升 12%，并复盘了流程。',
     '想做 PM 因为喜欢用数据解决问题，3 年内想成为能独立带产品线的高级 PM。',
     '那个项目我主导了策略设计，协调了算法和工程团队，自己负责数据验证。',
   ]
-  for (let i = 0; i < 12; i++) {
-    // 已跳复盘则结束
+  for (let i = 0; i < 24; i++) {
+    // 已跳复盘则结束（LLM 可能提前结束面试）
     if (page.url().includes('/debrief')) break
 
     const input = page.locator('.answer-input')
     await input.waitFor({ state: 'visible', timeout: 30_000 })
     await input.fill(answers[i % answers.length])
-    // 等发送按钮可用（后端一轮 LLM 可能 30-60s：评估+追问生成，放宽到 90s）
+    // 等发送按钮可用（后端一轮 LLM 可能 30-60s：评估+节奏决策，放宽到 90s）
     const sendBtn = page.locator('.btn-send')
     await expect(sendBtn).toBeEnabled({ timeout: 90_000 })
     await sendBtn.click()
 
-    // 等待下一题出现或跳复盘（评估 LLM 5-10s）
+    // 等待下一题出现或跳复盘（评估+决策 LLM 5-10s）
     await page.waitForTimeout(6000)
   }
 

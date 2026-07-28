@@ -135,15 +135,21 @@
       <p class="field-hint">关联后，面试会围绕 JD 差距重点考查；不关联则按画像目标岗位通用出题。</p>
     </section>
 
-    <!-- 提交 -->
+    <!-- 提交（sticky 底部：主 CTA 始终可见 + 配置摘要，避免看漏「开始面试」） -->
     <div class="submit-bar">
-      <div v-if="isLoading" class="progress">
-        <span class="spinner" />
-        <p>{{ progressMessage }}</p>
+      <div class="submit-summary">
+        <span class="sum-label">已选</span>
+        <span v-for="tag in personaTags" :key="tag" class="sum-tag">{{ tag }}</span>
       </div>
-      <button class="btn-primary btn-large" type="button" :disabled="isLoading" @click="onStart">
-        {{ isLoading ? '准备中…' : '开始面试' }}
-      </button>
+      <div class="submit-action">
+        <div v-if="isLoading" class="progress">
+          <span class="spinner" />
+          <p>{{ progressMessage }}</p>
+        </div>
+        <button class="btn-primary btn-large" type="button" :disabled="isLoading" @click="onStart">
+          {{ isLoading ? '准备中…' : '开始面试' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -585,13 +591,53 @@ onMounted(() => {
   }
 }
 
-/* 提交栏 */
+/* 提交栏（sticky 底部：主 CTA 始终可见 + 配置摘要） */
 .submit-bar {
+  position: sticky;
+  bottom: 0;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-lg;
+  margin-top: $spacing-xl;
+  padding: $spacing-md $spacing-xl;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid $border-color;
+  border-radius: $radius-lg;
+  box-shadow: 0 -4px 12px -4px rgba(15, 23, 42, 0.08);
+  z-index: $z-sticky;
+}
+
+.submit-summary {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.sum-label {
+  font-size: $font-size-xs;
+  color: $text-disabled;
+  margin-right: $spacing-xs;
+}
+
+.sum-tag {
+  padding: 2px $spacing-sm;
+  background: $bg-gray;
+  border-radius: $radius-full;
+  font-size: $font-size-xs;
+  color: $text-secondary;
+  white-space: nowrap;
+}
+
+.submit-action {
+  display: flex;
   align-items: center;
   gap: $spacing-md;
-  margin-top: $spacing-xl;
+  flex-shrink: 0;
 }
 
 .progress {

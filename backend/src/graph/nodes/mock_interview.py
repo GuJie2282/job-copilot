@@ -234,17 +234,31 @@ def evaluator_node(state: Dict[str, Any]) -> Dict[str, Any]:
     ideal = pkg.get("ideal_signals", [])
     probing = pkg.get("probing_points", [])
 
-    # LLM 信号差检测 + 追问措辞（合并：评估时一并按人设口吻产出 next_probe_followup，省一次往返）
-    # 失败降级：保守认为充分，不追问
+    # 整场进度上下文（供评估 LLM 做整场判断，如是否提前结束）
+    plan = state.get("question_plan") or {}
+    rs_pre = state.get("running_scores") or {}
+    rc_pre = rs_pre.get("_round_count", 0)
+    ss_pre = rs_pre.get("_score_sum", 0)
+    avg_so_far = round(ss_pre / rc_pre, 1) if rc_pre else None
+    interview_context = {
+        "round": current.get("round"),
+        "total_questions": plan.get("question_count", len(state.get("question_bank") or [])),
+        "has_qa_session": plan.get("has_qa_session"),
+        "qa_done": state.get("qa_done"),
+        "avg_score_so_far": avg_so_far,
+    }
+
+    # LLM 信号差检测 + 节奏决策(action) + 追问措辞（一次合并产出）
+    # 失败降级：保守认为充分、不追问，action=None 交规则 fallback
     eval_result = _llm_evaluate(
         current.get("question", ""), ideal, probing, current.get("answer", ""),
-        state.get("persona"),
+        state.get("persona"), interview_context,
     )
 
-    # 决策
+    # 决策（LLM 自主 action + 防崩盘护栏；缺失/非法 → 规则 fallback）
     decision = _decide(state, eval_result)
 
-    # 组装 transcript 条目（本轮完整记录：qa + evaluation + action）
+    # 组装 transcript 条目（本轮完整记录：qa + evaluation + action + 节奏理由）
     entry = {
         "round": current.get("round"),
         "question": current.get("question"),
@@ -253,6 +267,7 @@ def evaluator_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "is_probe": current.get("is_probe", False),
         "evaluation": eval_result,
         "action": decision,
+        "decision_reason": eval_result.get("action_reason"),
     }
 
     update: Dict[str, Any] = {
@@ -302,25 +317,36 @@ def _clean_eval_text(value) -> Optional[str]:
     return s
 
 
+# 合法节奏动作集合（评估 LLM 的 action 必须落在此集合内，否则视为非法 → 规则 fallback）
+_VALID_ACTIONS = {"probe", "next", "enter_qa", "end"}
+
+
 def _llm_evaluate(
     question: str,
     ideal_signals: list,
     probing_points: list,
     answer: str,
     persona: Optional[Dict[str, Any]] = None,
+    interview_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    调 LLM 做信号差检测 + 追问措辞（合并）。
-    追问措辞 next_probe_followup 按人设口吻一并产出，省一次 LLM 往返（原「评估+追问」两次串行 → 一次）。
-    任何失败 → 降级（保守认为充分，不追问）。
+    调 LLM 做信号差检测 + 节奏决策（action）+ 追问措辞（一次合并产出）。
+
+    【evolve-interview-pacing】除原有信号/评分/追问措辞外，一并产出自主节奏决策
+    action（probe|next|enter_qa|end）+ action_reason。action 供 _decide 经护栏校验后
+    采用；非法/缺失则返回 None，由 _decide 回退规则。
+    任何失败 → 降级（保守追问：miss=ideal_signals 交规则 fallback 判断，失败 ≠ 充分）。
     """
     try:
         llm = get_llm(temperature=0, timeout=20, tier="fast")  # 评估：快档（延迟敏感）+ 20s 短超时快速降级
-        prompt = get_evaluation_prompt(question, ideal_signals, probing_points, answer, persona)
-        resp = invoke_llm_with_retry(llm, prompt, max_retries=1)  # 最多重试 1 次，减少累积延迟
+        prompt = get_evaluation_prompt(question, ideal_signals, probing_points, answer, persona, interview_context)
+        resp = invoke_llm_with_retry(llm, prompt, max_retries=0)  # 不重试：偶发超时即降级（20s 上限），不拖到 43s；降级已保守追问，失败不再=不追
         data = _extract_json(resp.content)
         if not isinstance(data, dict):
             raise ValueError("评估 LLM 未返回 JSON 对象")
+        # action 合法性校验：非法/缺失 → None（触发 _decide 规则 fallback）
+        action = data.get("action")
+        action = action if action in _VALID_ACTIONS else None
         return {
             "hit_signals": data.get("hit_signals") or [],
             "miss_signals": data.get("miss_signals") or [],
@@ -328,23 +354,110 @@ def _llm_evaluate(
             "score": data.get("score"),
             "highlight": _clean_eval_text(data.get("highlight")),
             "weakness": _clean_eval_text(data.get("weakness")),
+            "action": action,
+            "action_reason": _clean_eval_text(data.get("action_reason")),
             "next_probe_followup": _clean_eval_text(data.get("next_probe_followup")),
         }
     except Exception as e:
-        logger.warning(f"评估 LLM 失败，降级（保守不追问）：{type(e).__name__}: {e}")
+        # 保守追问（fix：原降级假设充分=不追问，致评估偶发超时时"完全不追问"）：
+        # 评估失败 ≠ 回答充分。假设信号未验证（miss=ideal_signals），按可挖掘点给追问方向；
+        # action=None 交规则 fallback——看到 miss 非空且 miss_probe_map 有值 → probe（受 probing_limit 上限保护）；
+        # interviewer probe 分支 next_probe_followup 虽为 None，模板降级会用 miss_probe_map 生成"能具体讲讲——{点}"。
+        logger.warning(f"评估 LLM 失败，降级（保守追问：miss=ideal，交规则 fallback 判断）：{type(e).__name__}: {e}")
+        miss_map = {}
+        for i, sig in enumerate(ideal_signals):
+            miss_map[sig] = probing_points[i] if i < len(probing_points) else (probing_points[0] if probing_points else sig)
         return {
-            "hit_signals": ideal_signals,
-            "miss_signals": [],
-            "miss_probe_map": {},
+            "hit_signals": [],
+            "miss_signals": list(ideal_signals),
+            "miss_probe_map": miss_map,
             "score": 70,
             "highlight": None,
             "weakness": None,
+            "action": None,
+            "action_reason": f"评估服务异常（{type(e).__name__}），保守追问",
             "next_probe_followup": None,
         }
 
 
+# 节奏护栏常量（防崩盘，非业务限制；design 决策 2）
+# 业务护栏（追问几次、是否走完题库）已交给 LLM 自主；这里只兜"不死不崩"的底线。
+_PACE_MIN_ROUNDS = 2            # 最低总轮数：防 LLM 开场一两轮就 end，体验过短（可调）
+_PACE_PROBE_LIMIT = 5           # 单题最高追问：防在某一题上死循环（业务不限，仅防崩盘）
+_PACE_QA_MAX = 1                # 反问至多次数：防反复 enter_qa
+
+
 def _decide(state: Dict[str, Any], eval_result: Dict[str, Any]) -> str:
-    """本轮决策：probe / next / enter_qa / end。"""
+    """
+    本轮节奏决策：优先采用评估 LLM 的自主 action，经防崩盘护栏校验；
+    action 缺失/非法时回退规则 _rule_decide_fallback。
+
+    护栏只在越界时纠正（design 决策 2）：
+      - 已达最高总轮数 → 强制结束（防永不收尾）
+      - 单题追问达上限却选 probe → 换题/收尾
+      - 反问已进行却选 enter_qa → 换题/结束
+      - 无下一题却选 next → 转反问/结束
+      - 过早 end（且还有题）→ 继续问
+    """
+    action = eval_result.get("action")
+    if action not in _VALID_ACTIONS:
+        # action 缺失/非法 → 规则 fallback（降级与紧急回滚通道）
+        return _rule_decide_fallback(state, eval_result)
+    return _apply_guardrails(state, action)
+
+
+def _after_questions(state: Dict[str, Any]) -> str:
+    """题库问完后的去向：有反问环节且未进行 → enter_qa；否则 end。"""
+    plan = state.get("question_plan") or {}
+    if plan.get("has_qa_session") and not state.get("qa_done"):
+        return "enter_qa"
+    return "end"
+
+
+def _apply_guardrails(state: Dict[str, Any], action: str) -> str:
+    """对 LLM 的 action 套防崩盘护栏，越界则纠正为合法动作。"""
+    idx = state.get("current_q_idx", 0)
+    bank = state.get("question_bank") or []
+    plan = state.get("question_plan") or {}
+    probe_count = state.get("current_q_probes", 0)
+    qa_done = bool(state.get("qa_done"))
+    completed_rounds = len(state.get("transcript") or [])  # 已入库轮数（本轮尚未入库）
+
+    total_q = plan.get("question_count", len(bank))
+    max_rounds = total_q * (1 + _PACE_PROBE_LIMIT)  # 最高总轮数上限（防永不收尾）
+    has_next = idx + 1 < total_q
+
+    # 1) 已达最高总轮数 → 强制结束
+    if completed_rounds + 1 >= max_rounds:
+        return "end"
+
+    # 2) probe 护栏：单题追问上限（防死循环）→ 换题或收尾
+    if action == "probe" and probe_count >= _PACE_PROBE_LIMIT:
+        return "next" if has_next else _after_questions(state)
+
+    # 3) enter_qa 护栏：反问至多 _PACE_QA_MAX 次（这里以 qa_done 布尔兜底，已进行则不再进）
+    if action == "enter_qa" and qa_done:
+        return "next" if has_next else "end"
+
+    # 4) next 护栏：无下一题时转反问/结束
+    if action == "next" and not has_next:
+        return _after_questions(state)
+
+    # 5) 最低轮数护栏：过早 end（且还有下一题）→ 继续问
+    if action == "end" and completed_rounds + 1 < _PACE_MIN_ROUNDS and has_next:
+        return "next"
+
+    return action
+
+
+def _rule_decide_fallback(state: Dict[str, Any], eval_result: Dict[str, Any]) -> str:
+    """
+    原计数器规则决策（保留作降级与紧急回滚）。
+
+    逻辑：有可追问缺失信号且未到上限 → probe；否则按题库顺序 next / enter_qa / end。
+    注：fallback 用问答计划的 probing_limit（业务值，默认 3），与护栏的 _PACE_PROBE_LIMIT
+    （防崩盘值）职责分离——前者是 fallback 的业务节奏，后者是 LLM 自主时的崩盘底线。
+    """
     miss_map = eval_result.get("miss_probe_map") or {}
     miss_signals = eval_result.get("miss_signals") or []
     probe_count = state.get("current_q_probes", 0)
@@ -450,6 +563,8 @@ def _llm_debrief(profile: Dict[str, Any], transcript: list) -> Dict[str, Any]:
                 "answer": t.get("answer"),
                 "score": (t.get("evaluation") or {}).get("score"),
                 "miss_signals": (t.get("evaluation") or {}).get("miss_signals"),
+                "action": t.get("action"),
+                "decision_reason": t.get("decision_reason"),
             }
             for t in transcript
         ], ensure_ascii=False)

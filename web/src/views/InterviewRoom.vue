@@ -21,8 +21,22 @@
     <!-- 主体：消息流 + coach 侧栏 -->
     <div class="room-body">
       <div ref="messagesEl" class="messages">
-        <!-- 加载中 -->
-        <div v-if="loading" class="state-center">
+        <!-- 开局失败（后台出题异常） -->
+        <div v-if="setupError" class="state-center">
+          <span class="state-title">⚠ 面试开局失败</span>
+          <span class="state-sub">生成题目时出错，请重新开始一场面试。</span>
+          <button class="btn-primary" type="button" @click="retrySetup">重新开始</button>
+        </div>
+
+        <!-- 出题中（异步开局：后台正在生成第一题） -->
+        <div v-else-if="setupPending" class="state-center">
+          <span class="spinner lg" />
+          <span class="state-title">面试官正在为你准备题目…</span>
+          <span class="state-sub">通常需要 1 分钟左右，请稍候</span>
+        </div>
+
+        <!-- 加载中（初始进入） -->
+        <div v-else-if="loading" class="state-center">
           <span class="spinner lg" />
           <p>正在进入面试…</p>
         </div>
@@ -130,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import MessageBubble from '@/components/MessageBubble.vue'
@@ -168,6 +182,14 @@ const progressMessage = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 let progressTimer: ReturnType<typeof setInterval> | null = null
+
+// ── 异步开局：出题中轮询（add-async-interview-setup）──
+const setupPending = ref(false)   // 后台出题中（status=setup_pending）
+const setupError = ref(false)     // 开局失败（status=error 或轮询超时）
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollCount = 0
+const POLL_INTERVAL = 3000
+const POLL_MAX = 60  // 3s × 60 = 3 分钟轮询上限
 
 // ── 语音模式状态（add-voice-interview）──
 // inputMode：route.query.mode 优先（Setup 显式选），否则 localStorage 记忆，默认文字
@@ -224,23 +246,69 @@ function renderFromDetail(detail: any) {
 
 async function loadSession() {
   loading.value = true
+  setupError.value = false
   try {
-    const res: any = await getSession(sessionId)
-    if (res.status === 'success' && res.data) {
-      // finished 会话 GET detail 拿不到完整 transcript → 直接看复盘
-      if (res.data.status === 'finished') {
-        router.replace('/interview/debrief/' + sessionId)
-        return
-      }
-      renderFromDetail(res.data)
-    } else {
-      ElMessage.error(res.message || '加载面试失败')
-    }
+    await fetchSession()
   } catch (e: any) {
+    setupError.value = true
     ElMessage.error(e?.message || '加载面试失败')
   } finally {
     loading.value = false
   }
+}
+
+/** 拉一次会话状态并按 status 分支：finished→复盘 / error→失败态 / setup_pending→出题中轮询 / interviewing→渲染 */
+async function fetchSession() {
+  const res: any = await getSession(sessionId)
+  if (res.status !== 'success' || !res.data) {
+    setupError.value = true
+    ElMessage.error(res.message || '加载面试失败')
+    return
+  }
+  const st = res.data.status
+  if (st === 'finished') {
+    router.replace('/interview/debrief/' + sessionId)
+    return
+  }
+  if (st === 'error') {
+    setupError.value = true
+    stopPolling()
+    return
+  }
+  renderFromDetail(res.data)
+  // setup_pending 且无第一题 → 后台还在出题，显示出题中态并轮询
+  if (st === 'setup_pending' && !res.data.pending_question) {
+    setupPending.value = true
+    startPolling()
+  } else {
+    setupPending.value = false
+    stopPolling()
+  }
+}
+
+/** 出题中轮询：每 3s 拉一次，第一题就绪 / 失败 / 达 3min 上限则停 */
+function startPolling() {
+  if (pollTimer) return
+  pollTimer = setInterval(async () => {
+    pollCount++
+    if (pollCount > POLL_MAX) {
+      stopPolling()
+      setupError.value = true
+      return
+    }
+    await fetchSession()
+  }, POLL_INTERVAL)
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  pollCount = 0
+}
+
+/** 开局失败 → 回设置页重新开始 */
+function retrySetup() {
+  stopPolling()
+  router.push('/interview/setup')
 }
 
 // 评估/出题等待进度（前端基于时间模拟，单轮 LLM 可能 5-10s）
@@ -466,6 +534,10 @@ watch(() => messages.value.length, () => {
 onMounted(() => {
   loadSession()
 })
+
+onBeforeUnmount(() => {
+  stopPolling()
+})
 </script>
 
 <style scoped lang="scss">
@@ -581,6 +653,17 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: $spacing-md;
+  color: $text-secondary;
+}
+
+.state-title {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $ink;
+}
+
+.state-sub {
+  font-size: $font-size-sm;
   color: $text-secondary;
 }
 

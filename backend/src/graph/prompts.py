@@ -404,6 +404,90 @@ def get_json_extraction_prompt(resume_text: str, quality_score: float = 1.0) -> 
 
 
 # ============================================================================
+# 分段提取 Prompt（简历解析流式 + 提质量，对应 change add-streaming-pipeline 决策 5）
+# 把「一次提整份画像」拆成 basic/education/work/project/skills 五段，每段独立提取：
+# 上下文聚焦、输出短、准确率高；字段绑死在嵌套对象内，杜绝扁平平行数组错位。
+# ============================================================================
+
+# 各段的目标 schema 与提取焦点（每段输出对应 JSON 片段）
+_SECTION_SCHEMAS = {
+    "basic": {
+        "schema": {
+            "name": "string 或 null",
+            "phone": "string 或 null",
+            "email": "string 或 null",
+            "location": "string 或 null",
+            "self_summary": "个人总结/自我评价原文（string 或 null）",
+        },
+        "focus": "基本信息与个人总结：姓名、电话、邮箱、所在地、自我评价",
+    },
+    "education": {
+        "schema": [
+            {"school": "string", "degree": "string", "major": "string", "graduation_year": "string"}
+        ],
+        "focus": "教育背景:每段教育的学校、学历、专业、毕业年份（多条用数组）",
+    },
+    "work": {
+        "schema": [
+            {
+                "company": "string",
+                "position": "string",
+                "duration": "string",
+                "description": "职责与成果详情，保留原文细节",
+            }
+        ],
+        "focus": "工作/实习经历:在【企业/公司】做的经历（含实习、正式工作，以及在企业内做的项目），每段的公司、职位、时间、职责与成果详情（保留原文细节）",
+    },
+    "project": {
+        "schema": [
+            {"name": "string", "role": "string", "description": "项目内容、职责与成果，保留原文细节"}
+        ],
+        "focus": "项目经验:仅提取【个人项目】（无企业/公司归属的独立项目，如校园项目、个人 side project）;实习/工作经历中（在企业内做的）项目属于工作段，不要放进项目段。每个项目的名称、担任角色、详情（保留原文细节）",
+    },
+    "skills": {
+        "schema": {
+            "technical_skills": ["编程语言、框架、工具"],
+            "soft_skills": ["沟通、领导力等"],
+            "languages": ["英语等语言能力"],
+            "achievements": ["仅荣誉、奖项、证书（奖学金/竞赛获奖/CET 等）；严禁把项目成果或工作职责当荣誉"],
+        },
+        "focus": "技能与荣誉:技术技能、软技能、语言能力、仅荣誉奖项证书（项目成果属于 project 段，不要放进 achievements）",
+    },
+}
+
+
+def get_section_extraction_prompt(resume_text: str, section: str) -> str:
+    """
+    分段提取 Prompt：只提取指定段，输出该段嵌套 JSON 片段。
+
+    Args:
+        resume_text: 简历全文（每段都传全文，让 LLM 聚焦提取某一类）
+        section: 段名 basic / education / work / project / skills
+    Returns:
+        prompt 字符串
+    """
+    import json
+
+    spec = _SECTION_SCHEMAS[section]
+    schema_json = json.dumps(spec["schema"], ensure_ascii=False, indent=2)
+    return (
+        f"你是简历信息提取专家。本次**只提取「{spec['focus']}」**这一类信息，忽略其他内容。\n\n"
+        "## 输出格式\n"
+        "严格按以下 JSON 输出，**必须包裹在 ```json 代码块中**，不要任何解释：\n\n"
+        f"```json\n{schema_json}\n```\n\n"
+        "## 规则\n"
+        "1. **段归属（按企业分界）**：工作段 = 在企业/公司做的经历（含实习、正式工作，以及企业内做的项目）；项目段 = 个人项目（无企业归属，如校园项目、个人项目）。按此分界果断归类：有企业/公司的归工作段，无企业的归项目段，不要纠结。\n"
+        "2. **保留原文**：用原文表述，不要改写或概括；详情字段（description）保留原始细节，不要压成一句话。\n"
+        "3. **保守提取**：找不到的字段填 null；本段数组字段若无内容填 []。\n"
+        "4. **多条用对象数组**：教育/工作/项目通常多条，每条是一个对象，各字段绑死在同一对象内（严禁用平行数组）。\n"
+        "5. **果断简洁（重要）**：对边界情况果断判断（如某项目写在实习段下，仍归项目段；实习经历归工作段），**不要反复权衡同一问题**；思考过程简洁、一次定论，不重复循环。\n\n"
+        "## 简历文本\n"
+        f"{resume_text}\n\n"
+        "请开始提取（只输出本段 JSON）："
+    )
+
+
+# ============================================================================
 # JD 结构化解析 Prompt
 # ============================================================================
 
@@ -584,7 +668,8 @@ def get_resume_generation_prompt(
 
 {gap_section}{jd_section}## 简历格式规范（必须严格遵守，格式校验器会查这些硬规则）
 - 首个一级标题必须是 `# self-intro`，下用 `key: value` 放 name / role / phone / email / location 等
-- 教育写一行：`education: 学校 · 专业 · 学历 · 2026届`（必须含毕业届或毕业年份）
+- **字段行（`key: value`，如 name / role / education / phone）只允许出现在 `# self-intro` 模块内**；其他模块正文严禁写字段行，否则字段名会作为字面文字渲染进简历（如「教育背景」模块下写 `education:` 会多出一个「education:」）。
+- 教育背景用独立模块 `# 教育背景`，下用 `## 学校 | 专业 · 学历` + `date: 入学 — 毕业`（**必须含毕业届或毕业年份**，date 用 YYYY.MM 格式）；**不要**用 `education:` 字段行
 - 每个模块用 `# 模块名`（如 `# 教育背景` / `# 工作经历` / `项目经历` / `技能`）
 - 经历用 `## 机构 | 角色`，下一行 `date:` **必须用 YYYY.MM 格式**（如 `date: 2025.06 — 至今` 或 `date: 2023.05 — 2025.06`），**严禁用「2025年06月」中文格式**
 - 经历要点用**扁平**的 `- 要点`（每条独立一行，STAR + 量化，1-2 行），**不要嵌套子 bullet**（不要「- 主项」下再缩进「- 子项」；多条要点都平级用 `- `）
@@ -600,6 +685,11 @@ def get_resume_generation_prompt(
 6. **经历要点必须扁平（重点）**：每条 `- 要点` 独立一行、平级，**严禁嵌套**。正确写法：
    `- 主导 XX 系统 redesign，日活提升 30%`（一条一行，把细节揉进这一条）。
    **错误（禁止）**：`- 主项` 下再缩进 `- 子项`。需要展开细节时，合并进同一条 bullet（如「主导 XX，含需求分析、设计与推进，日活提升 30%」）。
+
+## 思考约束
+- 思考过程用中文（除字段名 / 工具名等必要英文外）。
+- 不要无意义重复：不复述画像 / 差距 / 规范原文，不把同一简历内容反复起草多遍后只取一版。
+- 其余推理充分自由发挥，以保证简历质量为先（思考可以详细，但不要原地打转重复）。
 
 ## 输出
 **直接输出 Markdown 简历全文**，不要用代码块包裹，不要任何解释或前后缀文字。
@@ -655,8 +745,34 @@ def get_resume_refine_prompt(
 3. **格式规范不变**：`# self-intro` 首模块、`## 机构 | 角色`、`date:`、标题只用 `#`/`##`。
 4. **表述规则不变**：STAR + 强动词、脱敏、不编造（画像里没有的不要写，缺素材标「待补充」）。
 
-## 输出
-**直接输出修改后的完整 Markdown 简历**，不要代码块包裹，不要解释。
+## 思考要求（重要——思考过程用户可见，务必精简）
+思考控制在 **5 句以内**，只讲四件事，点到为止：
+1. **定位**：用户要改哪一处（1 句，指到具体行/句）
+2. **取材**：从画像取哪个具体素材来改（1 句，引用关键词即可，**不要复述整段画像**）
+3. **改法**：打算怎么改写（1-2 句）
+4. **核查**：有没有编造、格式是否合规（1 句）
+
+**禁止**（这些会让思考又长又没用）：
+- 复述精修规则 / 输出格式（你已知，不用再讲给自己听）
+- 把候选人画像整段罗列或转述
+- **把简历草稿（current_md）完整复述一遍**——简历用户在左侧已能看到，思考里只需引用「要改的那一句/那一段」，不要重抄整份简历
+- 反复自我修正、推翻重来（想清楚再写，不要把犹豫过程倒出来）
+- 把同一句话拆解后用多种组合重复表达
+
+思考是给用户看「你怎么想的」，不是你的草稿纸。
+
+## 输出格式（严格遵守）
+分两段输出，用分隔符隔开，使前端能把「自然语言说明」与「改写后简历」分开呈现：
+1. `<<<REPLY>>>` 后是一段自然语言说明（1-3 句）：告诉用户你这次做了哪些修改、为什么。
+2. `<<<RESUME>>>` 后是修改后的完整 Markdown 简历。
+
+示例：
+<<<REPLY>>>我把第二段经历的量化数据补上了（DAU 提升 30%），并把 AI 项目前置以突出落地能力。<<<RESUME>>>
+# self-intro
+name: 张三
+...（完整 Markdown 简历，不要代码块包裹）
+
+自然语言说明要简短具体；简历段必须完整、格式规范（`# self-intro` 首模块、`## 机构 | 角色`、`date:`、标题只用 `#`/`##`）。
 """
     return prompt
 
@@ -846,20 +962,22 @@ def get_evaluation_prompt(
     probing_points: list,
     answer: str,
     persona: Optional[Dict[str, Any]] = None,
+    interview_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
-    获取面试回答评估 Prompt（信号差检测 + 追问措辞）。
+    获取面试回答评估 Prompt（信号差检测 + 节奏决策 + 追问措辞）。
 
-    拿候选人回答比对 ideal_signals，输出命中/缺失信号 + 缺失→可挖掘点映射，
-    让追问「按图索骥、可控可解释」，而非 LLM 临场自由发挥。
+    拿候选人回答比对 ideal_signals，输出命中/缺失信号 + 评分 + 追问措辞，
+    并由 LLM 自主决定下一节奏动作（action：追问/换题/反问/结束）。
 
-    【LLM 时序优化】追问措辞（next_probe_followup）并入本次评估一起产出——
-    原「评估 LLM + 追问 LLM」两次串行合并为一次。追问方向仍由「缺失信号→可挖掘点」
-    决定（按图索骥不变），只是措辞按面试官人设口吻一并生成，省一次 LLM 往返。
-    若回答充分（无缺失信号）则 next_probe_followup 填 null。
+    【evolve-interview-pacing】节奏决策（action）并入本次评估一起产出——取代原
+    写死的计数器规则 _decide。LLM 依据回答充分度 / 疑虑 / 亮点 / 整场进度，像真人
+    面试官一样自主选择动作；护栏（_decide 内）仅防崩盘兜底。追问方向可参考但不仅
+    限于预埋可挖掘点（图为弹药、临场可发挥）。若 action≠probe 则 next_probe_followup
+    填 null。
     """
     import json
-    # ── 人设解析（追问措辞的口吻依据；与原 get_followup_prompt 复用同一套字段）──
+    # ── 人设解析（追问措辞与 action 决策的口吻依据）──
     persona = persona or {}
     tone = persona.get("tone", "专业")
     role = persona.get("role") or {}
@@ -868,9 +986,27 @@ def get_evaluation_prompt(
     style = persona.get("style_prompt", "")
     stress_hint = "压力面模式：可适度质疑、追问到底，考察候选人抗压。" if stress else ""
 
+    # ── 整场进度上下文（支撑 action 的"整场判断"，如是否提前结束）──
+    ctx = interview_context or {}
+    round_no = ctx.get("round")
+    total_q = ctx.get("total_questions")
+    has_qa = ctx.get("has_qa_session")
+    qa_done = ctx.get("qa_done")
+    avg_so_far = ctx.get("avg_score_so_far")
+    progress_parts = []
+    if round_no:
+        progress_parts.append(f"当前第 {round_no} 轮")
+    if total_q:
+        progress_parts.append(f"题库共 {total_q} 题")
+    if avg_so_far is not None:
+        progress_parts.append(f"前几轮平均分 {avg_so_far}")
+    if has_qa:
+        progress_parts.append("含反问环节" + ("（已进行）" if qa_done else "（尚未进行）"))
+    progress_line = "；".join(progress_parts) if progress_parts else "无进度信息"
+
     sig_text = json.dumps(ideal_signals, ensure_ascii=False)
     probe_text = json.dumps(probing_points, ensure_ascii=False)
-    prompt = f"""你是一位严谨的面试评估官。评估候选人对面试问题的回答质量。
+    prompt = f"""你是一位严谨又像真人的面试官。评估候选人对面试问题的回答质量，并决定接下来怎么走这场面试。
 
 ## 面试问题
 {question}
@@ -878,11 +1014,14 @@ def get_evaluation_prompt(
 ## 该题理想信号（好回答应体现）
 {sig_text}
 
-## 可挖掘点（可用于追问的方向）
+## 可挖掘点（可用于追问的方向，非穷尽）
 {probe_text}
 
 ## 候选人回答
 {answer}
+
+## 整场进度
+{progress_line}
 
 ## 输出格式（**必须包裹在 ```json 代码块中**）
 ```json
@@ -893,21 +1032,27 @@ def get_evaluation_prompt(
   "score": 75,
   "highlight": "回答亮点（无则 null）",
   "weakness": "回答失分点（无则 null）",
-  "next_probe_followup": "若 miss_signals 非空：按面试官人设口吻的一句自然追问；无缺失信号则 null"
+  "action": "probe | next | enter_qa | end",
+  "action_reason": "一句话说明为什么选这个动作（像面试官的内心判断）",
+  "next_probe_followup": "若 action=probe：按人设口吻的一句自然追问；否则 null"
 }}
 ```
 
 ## 规则
 1. score 0-100：按理想信号命中度 + 回答深度（具体、有数据、有反思）综合评分。
 2. miss_signals：理想信号中回答未体现的（回答充分则空数组）。
-3. miss_probe_map：为每个缺失信号映射一个可挖掘点（追问方向）；不足以对应则值填 null。
+3. miss_probe_map：为每个缺失信号映射一个可挖掘点；不足以对应则值填 null。
 4. highlight/weakness：具体简短、引用回答内容；没有则 null。
-5. **next_probe_followup（追问措辞，本次一并生成省一次 LLM 往返）**：
-   - 若 miss_signals 非空：你就是面试官（{role_str}，风格{tone}），从缺失信号对应的可挖掘点里挑一个最值得深挖的方向，用你的风格写**一句**自然追问。{style}{stress_hint}
-     像真人面试官的口吻，不要机械模板，不要每次都用"关于你刚才的回答"开头；不带引号、不带前缀标签，只写追问这一句本身。
-   - 若 miss_signals 为空（回答充分）：填 null。
-6. 客观严谨，不奉承。
-7. **语音识别容错**：回答可能来自语音转写，含同音/近音错字（如「日活」→「日火」、「复购」→「负购」、「站会」→「占会」）或口语化表达与停顿。请结合上下文按**语义**判断信号命中与评分，不要因字面小瑕疵误判——例如「日火提升 15%」应理解为「日活提升」，判为命中「量化结果」类信号。
+5. **action（节奏决策，本次一并产出）**——你就是面试官（{role_str}，风格{tone}），像真人一样决定这场面试接下来怎么走：
+   - **probe（追问）**：回答还没说透——有疑虑、有矛盾、有可深挖的点（含候选人主动提到、值得追的方向，不限于上方可挖掘点）。听出味道就追。
+   - **next（换下一题）**：这道已问清楚（无论答得好坏），不必再纠缠，往下走。
+   - **enter_qa（进入反问）**：你问得差不多了，把舞台交给候选人提问（仅当整场进度含反问环节且尚未进行）。
+   - **end（结束面试）**：你已能对候选人下判断，没必要继续——可能表现足够亮眼已无需再考，也可能明显不胜任再问也是浪费。**不必非走完全部题**，该收尾就收尾。
+   {style}{stress_hint}
+6. **action_reason**：一句话讲清判断依据（如"回答缺量化数据，追问具体结果"/"已充分体现数据驱动，换题"/"全程浮于表面，提前结束"）。
+7. **next_probe_followup（追问措辞）**：仅当 action=probe 时给出。挑一个最值得深挖的方向（可来自缺失信号对应的可挖掘点，也可来自回答里临场的亮点/疑点），用你的风格写**一句**自然追问。像真人面试官口吻，不要机械模板，不要每次都用"关于你刚才的回答"开头；不带引号、不带前缀标签，只写追问这一句本身。action≠probe 时填 null。
+8. 客观严谨，不奉承。
+9. **语音识别容错**：回答可能来自语音转写，含同音/近音错字（如「日活」→「日火」、「复购」→「负购」、「站会」→「占会」）或口语化表达与停顿。请结合上下文按**语义**判断信号命中、评分与 action 决策，不要因字面小瑕疵误判——例如「日火提升 15%」应理解为「日活提升」，判为命中「量化结果」类信号。
 
 请输出 JSON：
 """
@@ -938,7 +1083,7 @@ def get_debrief_prompt(profile_summary: str, transcript_json: str, target_positi
 ## 目标岗位
 {target_position}
 
-## 面试记录（每轮含：问题、候选人回答、得分、缺失信号）
+## 面试记录（每轮含：问题、候选人回答、得分、缺失信号、节奏动作 action、节奏理由 decision_reason）
 {transcript_json}
 
 ## 输出格式（**必须包裹在 ```json 代码块中**）
@@ -966,7 +1111,8 @@ def get_debrief_prompt(profile_summary: str, transcript_json: str, target_positi
 4. **next_steps 必须可执行**：如「针对目标岗位，准备 3 个 STAR 故事覆盖『数据驱动决策』方向」。
    **禁止**「加强沟通能力」「提升逻辑思维」式空话。结合目标岗位与候选人弱点。
 5. 客观、建设性，不奉承。
-6. **语音识别容错**：面试记录可能来自语音转写，含同音/近音错字（如「日活」→「日火」、「复购」→「负购」、「漏斗」→「漏豆」）或口语化表达。理解候选人回答时按**语义**还原真实意图，better_version / improvement_point / inappropriate_answers / stuck_points 的判断均基于还原后的语义，不要因字面错字误判「跑题」或「卡壳」。
+6. **参考节奏判断**：每轮记录含 action（面试官当轮动作：probe 追问 / next 换题 / enter_qa 反问 / end 结束）与 decision_reason（该动作的自然语言理由）。分析候选人表现时可参考这些节奏信号——例如连续 probe 往往说明回答屡未说透、提前 end 反映表现已定性，有助于定位卡壳与失分。
+7. **语音识别容错**：面试记录可能来自语音转写，含同音/近音错字（如「日活」→「日火」、「复购」→「负购」、「漏斗」→「漏豆」）或口语化表达。理解候选人回答时按**语义**还原真实意图，better_version / improvement_point / inappropriate_answers / stuck_points 的判断均基于还原后的语义，不要因字面错字误判「跑题」或「卡壳」。
 
 请输出 JSON：
 """

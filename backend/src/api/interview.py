@@ -21,13 +21,14 @@
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from langgraph.types import Command
 
 from src.core.deps import get_db
 from src.models.interview import InterviewSessionModel
+from src.models.base import SessionLocal
 from src.graph.state import create_initial_state
 from src.graph.nodes.mock_interview import build_interview_graph
 from src.graph.checkpointer import get_interview_checkpointer
@@ -108,12 +109,13 @@ def _session_summary(row: InterviewSessionModel) -> Dict[str, Any]:
 # ============================================================================
 
 @interview_router.post("/sessions", response_model=ApiResponse)
-async def create_session(req: CreateSessionRequest, db: Session = Depends(get_db)):
+async def create_session(req: CreateSessionRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     创建模拟面试会话。
 
-    流程：画像就绪性检查 → 建 session 记录 → 跑图到第一个 interrupt → 返回第一题。
-    - 画像缺失：PROFILE_MISSING
+    异步开局（add-async-interview-setup）：画像检查 → 建 session(setup_pending) → 后台跑图出题 → 立即返回 session_id。
+    第一题由前端轮询 getSession 获取（status: setup_pending → interviewing）。
+    - 画像缺失：PROFILE_MISSING（同步返回，不进后台）
     - 画像经历细节不足：警告但不阻断（仍可通用面试）
     """
     # 画像就绪性检查
@@ -129,7 +131,7 @@ async def create_session(req: CreateSessionRequest, db: Session = Depends(get_db
     # 建会话记录
     session = InterviewSessionModel(
         user_id=req.user_id,
-        status="interviewing",
+        status="setup_pending",
         interview_type=req.interview_type,
         intensity=req.intensity,
         interview_mode=req.interview_mode,
@@ -140,40 +142,55 @@ async def create_session(req: CreateSessionRequest, db: Session = Depends(get_db
     db.commit()
     db.refresh(session)
 
-    # 跑图到第一个 interrupt
+    # 异步开局（add-async-interview-setup）：出题移到后台，立即返回 setup_pending
+    init = create_initial_state(user_id=req.user_id)
+    init["session_id"] = session.id
+    init["interview_type"] = req.interview_type
+    init["intensity"] = req.intensity
+    init["interview_mode"] = req.interview_mode
+    init["persona"] = req.persona or {}
+    if req.jd_result_id:
+        init["jd_result_id"] = req.jd_result_id
+
+    background_tasks.add_task(_run_setup_background, session.id, init)
+
+    return ApiResponse(
+        status="success",
+        message="面试正在准备",
+        data={
+            "session_id": session.id,
+            "interview_status": "setup_pending",
+            "detail_warning": detail_warning,
+        },
+    )
+
+
+def _run_setup_background(session_id: str, init: Dict[str, Any]) -> None:
+    """
+    后台跑图到第一个 interrupt（出题），完成后置会话状态为 interviewing；失败置 error。
+
+    - 在响应发出后、请求 db 关闭后执行，故内部新建独立 db session。
+    - 同步 graph.invoke 由 Starlette BackgroundTasks 置于线程池跑，不阻塞事件循环。
+    - 失败原因记 logger（前端据 status=error 显示 generic 重试提示）。
+    """
+    db = SessionLocal()
     try:
         graph = _get_graph()
-        config = {"configurable": {"thread_id": session.id}}
-        init = create_initial_state(user_id=req.user_id)
-        init["session_id"] = session.id
-        init["interview_type"] = req.interview_type
-        init["intensity"] = req.intensity
-        init["interview_mode"] = req.interview_mode
-        init["persona"] = req.persona or {}
-        if req.jd_result_id:
-            init["jd_result_id"] = req.jd_result_id
-
-        graph.invoke(init, config)
-        first_q = _get_pending_question(graph, config)
-
-        return ApiResponse(
-            status="success",
-            message="面试已开始",
-            data={
-                "session_id": session.id,
-                "interview_status": "interviewing",
-                "first_question": first_q,
-                "detail_warning": detail_warning,
-            },
-        )
+        config = {"configurable": {"thread_id": session_id}}
+        graph.invoke(init, config)  # session_setup 出题 → 抵达第一个 interrupt
+        sess = db.query(InterviewSessionModel).filter(InterviewSessionModel.id == session_id).first()
+        if sess and sess.status == "setup_pending":
+            sess.status = "interviewing"
+            db.commit()
+        logger.info(f"后台出题完成 session={session_id}")
     except Exception as e:
-        session.status = "error"
-        db.commit()
-        return ApiResponse(
-            status="error",
-            message=f"启动面试失败：{e}",
-            data={"error_code": "START_FAILED"},
-        )
+        logger.exception(f"后台出题失败 session={session_id}: {type(e).__name__}: {e}")
+        sess = db.query(InterviewSessionModel).filter(InterviewSessionModel.id == session_id).first()
+        if sess:
+            sess.status = "error"
+            db.commit()
+    finally:
+        db.close()
 
 
 # ============================================================================

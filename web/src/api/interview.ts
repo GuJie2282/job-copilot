@@ -16,10 +16,12 @@ import type { CreateSessionRequest } from '@/types/interview'
 
 /**
  * 创建面试会话。
- * timeout 90s：后端 session_setup 要出题（LLM）+ 可选 RAG 检索，通常 5-15s，留足余量。
+ * timeout 180s：后端 session_setup 出题走 strong 档（glm-4.5），实测单次 ~62s + RAG 检索，
+ * 总耗时常 70-85s，偶发逼近/超过原 90s 超时导致「请求失败」。放宽到 180s 覆盖单次出题 + 余量。
+ * 根治方案：出题降档 strong→fast（见 evolve-interview-pacing 之外的优化，待定）。
  */
 export async function createSession(data: CreateSessionRequest) {
-  return await client.post('/interview/sessions', data, { timeout: 90000 })
+  return await client.post('/interview/sessions', data, { timeout: 180000 })
 }
 
 /**
