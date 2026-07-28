@@ -48,6 +48,20 @@ from src.models import resume  # 导入简历模型（简历优化产物）以�
 # 创建数据库表（如果不存在）
 Base.metadata.create_all(bind=engine)
 
+# 轻量迁移（add-resume-avatar）：create_all 不给已有表加列，
+# 启动时检查 user_profiles 是否缺 avatar_url，缺则自动 ALTER（重启即生效，不丢数据）
+try:
+    from sqlalchemy import inspect, text as _sa_text
+    _insp = inspect(engine)
+    if _insp.has_table("user_profiles"):
+        _cols = [c["name"] for c in _insp.get_columns("user_profiles")]
+        if "avatar_url" not in _cols:
+            with engine.begin() as conn:
+                conn.execute(_sa_text("ALTER TABLE user_profiles ADD COLUMN avatar_url VARCHAR(500)"))
+            print("[INFO] migrated: added user_profiles.avatar_url")
+except Exception as _me:
+    print(f"[WARNING] avatar_url migration skipped: {_me}")
+
 # 创建 FastAPI 应用实例
 app = FastAPI(
     title="求职 Copilot API",
@@ -56,6 +70,14 @@ app = FastAPI(
     docs_url="/docs",  # Swagger UI 文档地址
     redoc_url="/redoc"  # ReDoc 文档地址
 )
+
+# 头像等静态资源服务（add-resume-avatar）：挂 /static → backend/data
+# 头像存 data/avatars/{user_id}.{ext}，前端 <img src="/static/avatars/...">；PDF 导出时后端转 base64 兜底
+# 用 __file__ 算绝对路径，不受 uvicorn 启动工作目录影响（main.py 在 backend/src/，data 在 backend/data）
+from fastapi.staticfiles import StaticFiles
+STATIC_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+os.makedirs(os.path.join(STATIC_DATA_DIR, "avatars"), exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DATA_DIR), name="static")
 
 # 导入限流器
 from src.core.limiter import limiter

@@ -21,9 +21,9 @@
         <button class="btn-primary" type="button" @click="loadProfile">重试</button>
       </div>
 
-      <!-- empty / ready：链路条 + 下一步 + 支撑数据 -->
+      <!-- empty / ready：链路条 + 下一步/祝贺 + 支撑数据 -->
       <template v-else>
-        <!-- ========== SIGNATURE：求职链路条（编码真实进度） ========== -->
+        <!-- ========== SIGNATURE：求职链路条（编码真实进度，随完成度链式推进） ========== -->
         <section class="track" aria-label="求职链路进度">
           <div
             v-for="s in stages"
@@ -32,7 +32,6 @@
             :class="s.status"
             @click="go(s.to)"
           >
-            <!-- 节点主体：圆点 + 文字 -->
             <div class="node-dot" />
             <div class="node-body">
               <span class="node-no tnum">{{ s.no }}</span>
@@ -42,8 +41,8 @@
           </div>
         </section>
 
-        <!-- ========== 下一步焦点（基于当前阶段） ========== -->
-        <section class="next">
+        <!-- ========== 下一步焦点（全 done 时隐藏，换成祝贺卡） ========== -->
+        <section v-if="!allDone" class="next">
           <p class="section-label">下一步</p>
           <div class="next-card" @click="go(nextStep.to)">
             <div class="next-body">
@@ -54,6 +53,14 @@
               {{ nextStep.cta }} <span class="arrow">→</span>
             </button>
           </div>
+        </section>
+
+        <!-- ========== 祝贺态：全链路完成 ========== -->
+        <section v-else class="celebrate">
+          <div class="cel-emoji">🎉</div>
+          <h3 class="cel-title">你已走完全链路！</h3>
+          <p class="cel-sub">从画像到面试，求职 Copilot 备齐了你的装备。<br />继续匹配更多岗位、打磨简历、多练几场面试，去拿 Offer。</p>
+          <button class="cel-cta" type="button" @click="go('/jd-matcher')">再去匹配一个岗位 →</button>
         </section>
 
         <!-- ========== 支撑数据：画像摘要 + 最近匹配（紧凑，ready 时显示） ========== -->
@@ -96,8 +103,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { getProfile } from '@/api/resume'
+import { getProfile, listResumes } from '@/api/resume'
 import { matchHistory } from '@/api/jd'
+import { listSessions } from '@/api/interview'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -109,6 +117,10 @@ const profile = ref<any>(null)
 
 // 最近匹配（最多取前几条做展示）
 const recentMatches = ref<any[]>([])
+
+// 链路条进度数据源：简历是否定稿、面试是否完成（链式推进判定用）
+const hasFinalizedResume = ref(false)
+const hasFinishedInterview = ref(false)
 
 // 真实计数（用户拍板：不算完成度，只显真实条数）
 const workCount = computed(() => profile.value?.companies?.length ?? 0)
@@ -122,34 +134,54 @@ const skillCount = computed(() => {
   )
 })
 
-// ===== 链路条 signature 的核心：四阶段 + 真实进度状态 =====
-// status 三态：done(已完成·墨蓝实心) / active(当前·琥珀高亮) / todo(未达·灰虚线)
+// ===== 链路条 signature 的核心：四阶段 + 链式严格完成判定 =====
+// status 三态：done(已完成·墨蓝实心+流光连线) / active(当前·琥珀高亮 pulse) / todo(未达·灰虚线)
+// 链式：stage N done 要求 stage N-1 先 done（不可跳过中间）
 type StageStatus = 'done' | 'active' | 'todo'
 type StageKey = 'profile' | 'match' | 'resume' | 'interview'
 
 const stages = computed(() => {
   const hasProfile = profileState.value === 'ready' && !!profile.value
-  const hasMatch = recentMatches.value.length > 0
-  // NOTE: 简历优化 / 模拟面试 的历史 Home 暂未拉取，先以 todo 呈现；
-  //       方向验证后推广时接入对应历史接口，让进度判定完整准确。
-  const list: { no: string; key: StageKey; name: string; to: string; status: StageStatus; meta: string }[] = [
+  const hasMatch = recentMatches.value.some((m: any) => m.overall_score != null)
+  // 链式 done：每一环都要前一环先 done
+  const s1 = hasProfile
+  const s2 = s1 && hasMatch
+  const s3 = s2 && hasFinalizedResume.value
+  const s4 = s3 && hasFinishedInterview.value
+
+  const firstMatchScore = recentMatches.value.find((m) => m.overall_score != null)?.overall_score
+
+  const status = (done: boolean, prevDone: boolean): StageStatus =>
+    done ? 'done' : prevDone ? 'active' : 'todo'
+
+  return [
     {
-      no: '01', key: 'profile', name: '建立画像', to: '/resume-parser',
-      status: hasProfile ? 'done' : 'active',
+      no: '01', key: 'profile' as StageKey, name: '建立画像', to: '/resume-parser',
+      status: status(s1, true),  // 第一环无前置，未完成即 active
       meta: hasProfile ? `${workCount.value}段经历` : '从这里开始',
     },
     {
-      no: '02', key: 'match', name: 'JD 匹配', to: '/jd-matcher',
-      status: hasMatch ? 'done' : (hasProfile ? 'active' : 'todo'),
-      meta: hasMatch ? `最近 ${recentMatches.value[0]?.overall_score ?? '-'} 分` : (hasProfile ? '建议下一步' : '待解锁'),
+      no: '02', key: 'match' as StageKey, name: 'JD 匹配', to: '/jd-matcher',
+      status: status(s2, s1),
+      meta: hasMatch ? `最近 ${firstMatchScore ?? '-'} 分` : (s1 ? '建议下一步' : '待解锁'),
     },
-    { no: '03', key: 'resume', name: '简历优化', to: '/resume-optimizer', status: 'todo', meta: '待开始' },
-    { no: '04', key: 'interview', name: '模拟面试', to: '/interview/setup', status: 'todo', meta: '待开始' },
+    {
+      no: '03', key: 'resume' as StageKey, name: '简历优化', to: '/resume-optimizer',
+      status: status(s3, s2),
+      meta: hasFinalizedResume.value ? '已定稿' : (s2 ? '建议下一步' : '待解锁'),
+    },
+    {
+      no: '04', key: 'interview' as StageKey, name: '模拟面试', to: '/interview/setup',
+      status: status(s4, s3),
+      meta: hasFinishedInterview.value ? '已完成' : (s3 ? '建议下一步' : '待解锁'),
+    },
   ]
-  return list
 })
 
-// 当前阶段：优先 active，否则最后一个 done，否则第一站
+// 全链路完成 → 祝贺态
+const allDone = computed(() => stages.value.every((s) => s.status === 'done'))
+
+// 当前阶段：优先 active，否则最后一个 done（全 done 时无 active，用于 nextStep fallback）
 const currentStage = computed(() => {
   const active = stages.value.find((s) => s.status === 'active')
   if (active) return active
@@ -161,6 +193,7 @@ const currentStage = computed(() => {
 const thesis = computed(() => {
   if (profileState.value === 'empty') return '先建立画像，AI 才能陪你走完求职全链路。'
   if (profileState.value === 'error') return '先把画像读出来，继续你的求职进度。'
+  if (allDone.value) return '🎉 你已走完求职全链路，装备齐了，去拿 Offer 吧。'
   const stage = currentStage.value
   if (!stage) return '这是你的求职作战看板。'
   const map: Record<StageKey, string> = {
@@ -172,7 +205,7 @@ const thesis = computed(() => {
   return map[stage.key] ?? '这是你的求职作战看板。'
 })
 
-// 下一步焦点卡：标题 / 描述 / CTA 文案，都随当前阶段
+// 下一步焦点卡：标题 / 描述 / CTA 文案，都随当前阶段（全 done 时不显示）
 const nextStep = computed(() => {
   const s = currentStage.value
   if (!s) return { title: '', desc: '', cta: '', to: '/profile' }
@@ -229,6 +262,36 @@ async function loadMatches(): Promise<void> {
   }
 }
 
+/** 读取简历历史 → 判定是否已有定稿简历（静默失败） */
+async function loadResumes(): Promise<void> {
+  if (!userStore.userId) return
+  try {
+    const res: any = await listResumes(userStore.userId)
+    if (res.status === 'success' && res.data) {
+      // listResumes 返回 {岗位: [版本]}，遍历所有版本找 finalized
+      const groups = res.data.items || {}
+      hasFinalizedResume.value = Object.values(groups).some(
+        (versions: any) => Array.isArray(versions) && versions.some((v: any) => v.status === 'finalized')
+      )
+    }
+  } catch {
+    // 静默失败：链路条该环按未完成呈现
+  }
+}
+
+/** 读取面试历史 → 判定是否已有完成面试（静默失败） */
+async function loadSessions(): Promise<void> {
+  if (!userStore.userId) return
+  try {
+    const res: any = await listSessions(userStore.userId)
+    if (res.status === 'success' && res.data) {
+      hasFinishedInterview.value = (res.data.items || []).some((s: any) => s.status === 'finished')
+    }
+  } catch {
+    // 静默失败
+  }
+}
+
 /** 匹配度配色（对齐 token：$success / $warning / $error） */
 function scoreColor(s?: number): string {
   if ((s ?? 0) >= 75) return '#10b981'
@@ -239,13 +302,14 @@ function scoreColor(s?: number): string {
 onMounted(() => {
   loadProfile()
   loadMatches()
+  loadResumes()
+  loadSessions()
 })
 </script>
 
 <style scoped lang="scss">
 .home {
   // 顶栏 AppTopBar 是 sticky、占文档流 65px（64 高 + 1 边框）。
-  // 若这里仍写 min-height:100vh，总高 = 65 + 100vh ＞ 视口 → 底部空背景 + 能滚动。
   // 减去顶栏高度，内容少时刚好铺满、不多出；内容多时自然滚动。
   min-height: calc(100vh - 65px);
   background: $bg-light;
@@ -283,7 +347,7 @@ onMounted(() => {
   }
 }
 
-/* ========== SIGNATURE：求职链路条 ========== */
+/* ========== SIGNATURE：求职链路条（放大版） ========== */
 .track {
   display: flex;
   align-items: flex-start;
@@ -296,31 +360,40 @@ onMounted(() => {
   position: relative;
   text-align: center;
   cursor: pointer;
-  padding-top: 22px;                 // 给圆点 + 连线留位
+  padding-top: 30px;                 // 给放大后的圆点 + 连线留位
 
   // 连线：本节点左半段（从上一节点中心到本节点中心）
   &::before {
     content: '';
     position: absolute;
-    top: 9px;                        // 圆点垂直中心
+    top: 12px;                        // 圆点垂直中心（圆点 24px → 中心 12px）
     right: 50%;
     width: 100%;
-    height: 2px;
+    height: 3px;                      // 连线加粗 2→3
     transform: translateX(0.5px);
   }
   &:first-child::before {
-    display: none;                   // 首节点无左线
+    display: none;                    // 首节点无左线
   }
 
-  // 三态连线 + 圆点配色
-  &.done::before { background: $ink; }
+  // done 段：流光（渐变中一个琥珀亮点从右向左流过，表示"已通过"）
+  &.done::before {
+    background: linear-gradient(90deg, $ink 0%, $ink 55%, $accent-color 72%, $ink 88%);
+    background-size: 220% 100%;
+    animation: track-flow 2.6s linear infinite;
+  }
   &.active::before { background: $accent-color; }
   &.todo::before {
     background: transparent;
-    border-top: 2px dashed $border-color;
+    border-top: 3px dashed $border-color;
     height: 0;
-    top: 10px;
+    top: 13px;
   }
+}
+
+@keyframes track-flow {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
 }
 
 .node-dot {
@@ -328,8 +401,8 @@ onMounted(() => {
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 18px;
-  height: 18px;
+  width: 24px;                        // 圆点放大 18→24
+  height: 24px;
   border-radius: 50%;
   z-index: 1;
   transition: all $transition-base ease;
@@ -340,7 +413,7 @@ onMounted(() => {
 
   .active & {
     background: $accent-color;
-    box-shadow: 0 0 0 5px rgba($accent-color, 0.18);   // 琥珀光环
+    box-shadow: 0 0 0 6px rgba($accent-color, 0.18);   // 琥珀光环（放大后光环也加大）
     animation: pulse 2.4s ease-in-out infinite;
   }
 
@@ -351,26 +424,21 @@ onMounted(() => {
 
   // hover：节点轻微放大，提示可点
   .track-node:hover & {
-    transform: translateX(-50%) scale(1.18);
+    transform: translateX(-50%) scale(1.15);
   }
 }
 
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 5px rgba($accent-color, 0.18); }
-  50% { box-shadow: 0 0 0 9px rgba($accent-color, 0.08); }
-}
-
-// 尊重「减少动态」偏好
-@media (prefers-reduced-motion: reduce) {
-  .node-dot .active &,
-  .active .node-dot { animation: none; }
+  0%, 100% { box-shadow: 0 0 0 6px rgba($accent-color, 0.18); }
+  50% { box-shadow: 0 0 0 11px rgba($accent-color, 0.08); }
 }
 
 .node-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   padding: 0 $spacing-xs;
+  margin-top: $spacing-sm;
 
   .node-no {
     font-family: $font-mono;
@@ -381,7 +449,7 @@ onMounted(() => {
 
   .node-name {
     font-family: $font-heading;
-    font-size: $font-size-sm;
+    font-size: $font-size-base;       // 节点名放大 sm→base
     font-weight: $font-weight-semibold;
     color: $ink;
   }
@@ -394,6 +462,17 @@ onMounted(() => {
 
   .todo & .node-name { color: $text-disabled; }
   .active & .node-name { color: $accent-color; }
+}
+
+// 尊重「减少动态」偏好：禁用流光 + pulse
+@media (prefers-reduced-motion: reduce) {
+  .track-node.done::before {
+    animation: none;
+    background: $ink;                 // 退化为静态实线
+  }
+  .active .node-dot {
+    animation: none;
+  }
 }
 
 /* ========== 下一步焦点 ========== */
@@ -467,6 +546,56 @@ onMounted(() => {
     .arrow {
       transform: translateX(3px);
     }
+  }
+}
+
+/* ========== 祝贺态（全链路完成） ========== */
+.celebrate {
+  text-align: center;
+  background: $bg-white;
+  border: 1px solid $border-color;
+  border-left: 3px solid $success;    // 绿色完成条
+  border-radius: $radius-lg;
+  box-shadow: $shadow-sm;
+  padding: $spacing-2xl $spacing-xl;
+  margin-bottom: $spacing-2xl;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.cel-emoji {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.cel-title {
+  font-size: $font-size-xl;
+  color: $ink;
+}
+
+.cel-sub {
+  font-size: $font-size-sm;
+  color: $text-secondary;
+  max-width: 42ch;
+  line-height: $line-height-relaxed;
+}
+
+.cel-cta {
+  margin-top: $spacing-sm;
+  background: $primary-color;
+  color: #fff;
+  border: none;
+  padding: $spacing-sm $spacing-xl;
+  border-radius: $radius-md;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: background $transition-base ease;
+
+  &:hover {
+    background: $primary-dark;
   }
 }
 
@@ -608,7 +737,7 @@ onMounted(() => {
     font-size: $font-size-3xl;
   }
 
-  // 窄屏：链路条只留编号 + 名，meta 换行更紧凑
+  // 窄屏：链路条 meta 缩小，避免放大后挤
   .node-meta {
     font-size: 10px;
   }

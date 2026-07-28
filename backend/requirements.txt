@@ -63,3 +63,7 @@ apscheduler==3.11.0
 # 装包会带上 ctranslate2 / av(PyAV,音频解码) / onnxruntime / tokenizers
 faster-whisper==1.2.1
 # 注：pyttsx3 仅 test_voice_*.py 生成中文测试音频用（Windows SAPI 离线 TTS），非生产依赖，按需安装
+
+# 简历 PDF 导出（evolve-resume-refine：Playwright 服务端渲染 A4 PDF，取代浏览器打印对话框）
+# 装包后需 `python -m playwright install chromium`（预编译二进制 ~150MB，不编译，通常顺利）
+playwright==1.61.0

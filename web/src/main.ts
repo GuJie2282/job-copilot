@@ -2,6 +2,7 @@
  * 应用入口文件
  */
 import { createApp } from 'vue';
+import { vAutoScroll } from './directives/autoScroll';
 import { createPinia } from 'pinia';
 import ElementPlus from 'element-plus';
 import * as ElementPlusIconsVue from '@element-plus/icons-vue';
@@ -24,6 +25,9 @@ app.use(router);
 
 // 使用 Element Plus
 app.use(ElementPlus);
+
+// 全局指令：思考打字机区「贴底才跟随」自动滚动（v-auto-scroll）
+app.directive('auto-scroll', vAutoScroll);
 
 // 注册所有图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {

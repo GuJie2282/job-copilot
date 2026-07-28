@@ -3,6 +3,10 @@
   <header class="topbar">
     <div class="topbar-inner">
       <!-- 左：logo，点击回首页 -->
+      <!-- 返回上一页（非首页显示；无浏览历史则回首页兜底） -->
+      <button v-if="!isHome" class="back-btn" type="button" @click="goBack" aria-label="返回上一页">
+        <span class="back-arrow">←</span><span class="back-text">返回</span>
+      </button>
       <router-link to="/" class="logo">
         <span class="logo-mark">求</span>
         <span class="logo-name">求职 Copilot</span>
@@ -35,12 +39,26 @@
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
+import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
+
+// 当前是否首页（首页是根，不显示返回按钮）
+const isHome = computed(() => route.path === '/')
+
+/** 返回上一页；无浏览历史则回首页兜底 */
+function goBack(): void {
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/')
+  }
+}
 
 /** 用户菜单命令分发 */
 async function onCommand(command: string): Promise<void> {
@@ -91,6 +109,31 @@ async function handleLogout(): Promise<void> {
   justify-content: space-between;
   align-items: center;
   gap: $spacing-xl;
+}
+
+/* 返回按钮（非首页显示） */
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  background: none;
+  border: 1px solid $border-color;
+  border-radius: $radius-md;
+  padding: $spacing-xs $spacing-sm;
+  color: $text-secondary;
+  font-size: $font-size-sm;
+  cursor: pointer;
+  transition: all $transition-base ease;
+
+  &:hover {
+    border-color: $primary-color;
+    color: $primary-color;
+  }
+
+  .back-arrow {
+    font-size: $font-size-base;
+    line-height: 1;
+  }
 }
 
 /* logo */

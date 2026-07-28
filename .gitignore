@@ -24,6 +24,8 @@ Thumbs.db
 # 运行时数据（用户画像/面经/面试会话状态等本地数据，勿提交）
 data/*
 !data/.gitkeep
+# 头像存储（add-resume-avatar 运行时生成，勿提交）
+backend/src/data/
 # 面试会话状态库（checkpointer 持久化，运行时生成）
 backend/interview_checkpoints.db
 backend/interview_checkpoints.db-shm
@@ -35,3 +37,6 @@ backend/job_copilot.db
 
 # 前端测试产物（Playwright 运行结果，勿提交）
 web/test-results/
+
+# 前端验证脚本/截图（UI 改动 spike 产物，勿提交）
+web/.verify/

@@ -7,7 +7,10 @@
           <span class="brand-mark">求</span>
           <span class="brand-name">求职 Copilot</span>
         </div>
-        <h1 class="brand-thesis">把模糊的求职，<br />变成清晰的清单。</h1>
+        <h1 class="brand-thesis login-thesis">
+          <span class="t-blur">把模糊的求职，</span>
+          <span class="t-clear">变成清晰的<span class="t-hl">清单</span>。</span>
+        </h1>
         <p class="brand-sub">AI 求职教练 · 从画像到 Offer 的全链路陪伴</p>
         <ol class="brand-flow">
           <li><span class="num">01</span> 建立画像</li>
@@ -150,6 +153,30 @@ const goToRegister = (): void => {
 </script>
 
 <style scoped lang="scss">
+/* SIGNATURE：thesis「模糊→清晰」排版可视化（编码产品主张，字距+透明度+琥珀强调） */
+.login-thesis {
+  .t-blur {
+    display: block;
+    letter-spacing: 0.18em;            // 字距散 → 视觉"模糊"
+    color: rgba(255, 255, 255, 0.38);
+    font-weight: $font-weight-normal;
+  }
+
+  .t-clear {
+    display: block;
+    letter-spacing: 0.01em;            // 字距紧 → 视觉"清晰"
+    color: #fff;
+    font-weight: $font-weight-bold;
+    margin-top: $spacing-sm;
+  }
+
+  .t-hl {
+    color: $accent-color;              // 琥珀强调"清单"
+    border-bottom: 2px solid $accent-color;
+    padding-bottom: 2px;
+  }
+}
+
 .form-row {
   display: flex;
   justify-content: space-between;
