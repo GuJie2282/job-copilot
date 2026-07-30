@@ -365,9 +365,9 @@ def get_json_extraction_prompt(resume_text: str, quality_score: float = 1.0) -> 
   "positions": ["string"],
   "durations": ["string"],
   "work_descriptions": ["每段工作/实习经历的职责与成果详情，保留原文细节；与 companies 一一对应同序，找不到填 null"],
-  "technical_skills": ["string"],
-  "soft_skills": ["string"],
-  "languages": ["string"],
+  "technical_skills": ["Python", "需求分析", "Axure"],
+  "soft_skills": ["沟通能力", "团队协作"],
+  "languages": ["英语（CET-6）"],
   "project_names": ["string"],
   "project_roles": ["string"],
   "project_descriptions": ["每个项目的内容、职责与成果详情，保留原文细节；与 project_names 一一对应同序，找不到填 null"],
@@ -384,7 +384,7 @@ def get_json_extraction_prompt(resume_text: str, quality_score: float = 1.0) -> 
 1. **仔细核对**：确保每个字段都在原文中能找到依据
 2. **保留原文**：尽量使用原文的表述，不要改写或概括
 3. **保守提取**：如果信息模糊，使用 null 而不要编造
-4. **数组格式**：schools、companies 等字段必须是数组，即使只有一个元素
+4. **数组格式 + 技能拆分**：schools、companies 等字段必须是数组，即使只有一个元素。技能数组（technical_skills/soft_skills/languages）每项必须独立：严禁把多个技能用顿号/逗号塞进同一个字符串（错误 ["需求分析、原型设计、Python"]；正确 ["需求分析","原型设计","Python"]），即使简历原文把技能写成一行顿号连写，也要逐项拆开
 5. **null 值**：对于找不到的字段，使用 null 而不是空字符串或省略
 6. **详情字段（最重要）**：work_descriptions / project_descriptions 必须保留经历与项目的**原始细节**
    （如「需求分析：…」「产品设计：…」「成果数据：…」「核心成果：…」），**不要概括成一句话**；
@@ -446,12 +446,18 @@ _SECTION_SCHEMAS = {
     },
     "skills": {
         "schema": {
-            "technical_skills": ["编程语言、框架、工具"],
-            "soft_skills": ["沟通、领导力等"],
-            "languages": ["英语等语言能力"],
+            # ⚠️ 每个技能必须是数组里的「独立一项」（如 "Python"），严禁合并成一个顿号/逗号字符串
+            "technical_skills": ["Python", "FastAPI", "需求分析", "原型设计", "Axure"],
+            "soft_skills": ["沟通能力", "团队协作"],
+            "languages": ["英语（CET-6）"],
             "achievements": ["仅荣誉、奖项、证书（奖学金/竞赛获奖/CET 等）；严禁把项目成果或工作职责当荣誉"],
         },
-        "focus": "技能与荣誉:技术技能、软技能、语言能力、仅荣誉奖项证书（项目成果属于 project 段，不要放进 achievements）",
+        "focus": (
+            "技能与荣誉:技术技能、软技能、语言能力、仅荣誉奖项证书（项目成果属于 project 段，不要放进 achievements）。"
+            "⚠️技能拆分（重要）：每个技能必须是数组里的【独立一项】，逐个拆开；严禁用顿号/逗号/空格把多个技能塞进同一个字符串。"
+            "错误：[\"需求分析、原型设计、Python\"]；正确：[\"需求分析\",\"原型设计\",\"Python\"]。"
+            "即使简历原文把技能写成一行顿号连写，也要拆成数组多项。"
+        ),
     },
 }
 

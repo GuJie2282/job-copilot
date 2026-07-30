@@ -583,7 +583,7 @@ async def update_profile(
 # ============================================================================
 
 # 头像存储目录（与 main.py 的 StaticFiles mount 一致：backend/data/avatars）
-_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # resume.py 在 src/api/，需三层 dirname 回到 backend/（与 main.py 的 STATIC_DATA_DIR 一致）
 AVATAR_DIR = os.path.join(_BACKEND_ROOT, "data", "avatars")
 AVATAR_MAX_SIZE = 2 * 1024 * 1024  # 2MB（不引入 Pillow 做压缩，靠上传大小限制；压缩留后续）
 

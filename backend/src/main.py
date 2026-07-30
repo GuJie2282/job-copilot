@@ -91,6 +91,8 @@ frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[frontend_url],  # 允许的前端地址
+    # 公网测试：额外放行 cpolar 内网穿透的随机域名（免费版每次重启域名都变，用正则一劳永逸匹配）
+    allow_origin_regex=r"https://[a-z0-9]+\.r\d+\.cpolar\.cn",
     allow_credentials=True,  # 允许携带 Cookie
     allow_methods=["*"],  # 允许所有 HTTP 方法（GET、POST、PUT、DELETE 等）
     allow_headers=["*"],  # 允许所有请求头（包括 Authorization）
