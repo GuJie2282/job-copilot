@@ -44,7 +44,11 @@
 
       <!-- 方式 A：粘贴岗位 JD（可选） -->
       <div v-if="mode === 'paste'" class="mode-panel">
-        <label class="field-label" for="jdtext">岗位 JD（可选，留空则通用生成）</label>
+        <!-- 字段名 + 示例 JD 同一行（点示例会同时填好上面的「目标岗位」） -->
+        <div class="jd-head">
+          <label class="field-label" for="jdtext">岗位 JD（可选，留空则通用生成）</label>
+          <JdSamples :current-text="jdText" :disabled="loading" @select="onPickSample" />
+        </div>
         <textarea
           id="jdtext"
           v-model="jdText"
@@ -150,6 +154,7 @@ import { generateResumeStream } from '@/api/resume'
 import { matchHistory } from '@/api/jd'
 import type { MatchHistoryItem } from '@/types/jd'
 import ResumeEvalReport from '@/components/ResumeEvalReport.vue'
+import JdSamples from '@/components/JdSamples.vue'
 import ResumePreview from '@/components/ResumePreview.vue'
 
 const route = useRoute()
@@ -203,6 +208,19 @@ function onSelectMatch() {
   if (m?.position_title && !targetPosition.value.trim()) {
     targetPosition.value = m.position_title
   }
+}
+
+/**
+ * 点击示例 JD：JD 原文填进输入框，同时把「目标岗位」也一并填好。
+ *
+ * 为什么连岗位名一起覆盖：示例本身就是「岗位 + JD」成对给出的，只填 JD 会留下
+ * 一个和 JD 对不上的旧岗位名（比如 JD 是后端工程师、岗位还写着产品经理）。
+ * 岗位输入框就在上方，改了什么一眼可见。
+ */
+function onPickSample(payload: { position: string; text: string }): void {
+  mode.value = 'paste' // 示例只长在「粘贴 JD」面板里，这里兜个底
+  targetPosition.value = payload.position
+  jdText.value = payload.text
 }
 
 function onGenerate() {
@@ -355,6 +373,20 @@ onMounted(() => {
   background: $warning-light;
   border: 1px solid $warning;
   color: $warning;
+}
+
+/* 字段名 + 示例 JD 同一行：示例靠右（JdSamples 自带 margin-left:auto） */
+.jd-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+
+  /* label 原本是 block 且自带下边距；进了 flex 行后间距统一由 .jd-head 管 */
+  .field-label {
+    margin-bottom: 0;
+  }
 }
 
 .field-label {

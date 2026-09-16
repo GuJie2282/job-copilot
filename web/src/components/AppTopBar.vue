@@ -16,7 +16,8 @@
       <nav class="nav">
         <router-link to="/" class="nav-item" exact-active-class="is-active">首页</router-link>
         <router-link to="/profile" class="nav-item" exact-active-class="is-active">我的画像</router-link>
-        <router-link to="/jd-matcher" class="nav-item" exact-active-class="is-active">匹配</router-link>
+        <router-link to="/jd-matcher" class="nav-item" exact-active-class="is-active">JD匹配</router-link>
+        <router-link to="/resume-optimizer" class="nav-item" exact-active-class="is-active">简历优化</router-link>
         <router-link to="/interview/setup" class="nav-item" active-class="is-active">模拟面试</router-link>
         <router-link to="/interview/library" class="nav-item" active-class="is-active">面经库</router-link>
       </nav>
@@ -180,6 +181,10 @@ async function handleLogout(): Promise<void> {
   padding: $spacing-xs 0;
   border-bottom: 2px solid transparent;
   transition: color $transition-base ease;
+  /* 不许被压缩：flex 默认会挤窄导航项，中文被压到只剩一两个字宽就会竖排成
+     「我/的/画/像」，比整体换行难看得多。宁可换行/溢出，也不要单字竖排。 */
+  flex-shrink: 0;
+  white-space: nowrap;
 
   &:hover {
     color: $ink;
@@ -233,6 +238,32 @@ async function handleLogout(): Promise<void> {
 
   .nav {
     gap: $spacing-md;
+  }
+}
+
+/* 手机宽度：导航已到 6 项，一行放不下了，改成两行——上行 logo/头像，下行整条导航。
+   不这么做的话导航会被挤出顶栏（实测临界点约 470px）。
+   与上面「窄屏收起用户名」是同一套思路：空间不够时先收文字、再换行，别硬挤。 */
+@media (max-width: $container-sm) {
+  .topbar-inner {
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    padding: $spacing-sm $spacing-lg;
+  }
+
+  .logo-name {
+    display: none;
+  }
+
+  /* 导航整行铺开、居中，换行时不跟 logo 抢位置 */
+  .nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    justify-content: center;
+    flex-wrap: wrap;
+    row-gap: $spacing-xs;
   }
 }
 </style>

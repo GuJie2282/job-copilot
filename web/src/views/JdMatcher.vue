@@ -15,7 +15,11 @@
 
     <!-- JD 输入 -->
     <section class="card">
-      <label class="field-label" for="jd">职位描述（JD）</label>
+      <!-- 字段名 + 示例 JD 入口同一行（示例靠右，点一下直接填进下面的输入框） -->
+      <div class="jd-head">
+        <label class="field-label" for="jd">职位描述（JD）</label>
+        <JdSamples :current-text="jdText" :disabled="isLoading" @select="onPickSample" />
+      </div>
       <textarea
         id="jd"
         v-model="jdText"
@@ -129,6 +133,7 @@ import { useUserStore } from '@/stores/user'
 import { matchJd, matchHistory, matchDetail } from '@/api/jd'
 import type { MatchResult, MatchHistoryItem } from '@/types/jd'
 import GapList from '@/components/GapList.vue'
+import JdSamples from '@/components/JdSamples.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -193,6 +198,14 @@ function joinReqs(arr?: { requirement?: string }[]) {
 }
 
 // onMatch：流式匹配 + 两段式渲染（分数先出 → 规则 Gap 骨架 → enrich 回填建议）
+/**
+ * 点击示例 JD：把示例原文填进输入框（已填的内容会被覆盖，生成中时按钮禁用）。
+ * 不自动触发匹配——让用户先看清 JD 内容，再自己点「开始匹配」。
+ */
+function onPickSample(payload: { position: string; text: string }): void {
+  jdText.value = payload.text
+}
+
 function onMatch() {
   if (jdText.value.trim().length < 50) {
     ElMessage.warning('JD 内容过少，请粘贴更完整的职位描述')
@@ -391,6 +404,20 @@ onMounted(() => {
 }
 
 /* JD 输入 */
+/* 字段名 + 示例 JD 同一行：示例靠右（JdSamples 自带 margin-left:auto） */
+.jd-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-sm;
+
+  /* label 原本是 block 且自带下边距；进了 flex 行后间距统一由 .jd-head 管 */
+  .field-label {
+    margin-bottom: 0;
+  }
+}
+
 .field-label {
   display: block;
   font-weight: $font-weight-medium;
