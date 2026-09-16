@@ -39,7 +39,7 @@ backend/job_copilot.db
 test-results/
 web/test-results/
 
-# UI 验证脚本/截图（spike 产物，勿提交；正式截图放 docs/screenshots/）
+# UI 验证脚本/截图（spike 产物，勿提交；README 用的正式截图放 assets/screenshots/）
 .verify/
 web/.verify/
 
