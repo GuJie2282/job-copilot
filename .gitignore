@@ -36,7 +36,19 @@ backend/interview_checkpoints.db-wal
 backend/job_copilot.db
 
 # 前端测试产物（Playwright 运行结果，勿提交）
+test-results/
 web/test-results/
 
-# 前端验证脚本/截图（UI 改动 spike 产物，勿提交）
+# UI 验证脚本/截图（spike 产物，勿提交；正式截图放 docs/screenshots/）
+.verify/
 web/.verify/
+
+# 内网穿透隧道配置（含个人隧道地址，勿提交）
+web/.env.cpolar
+
+# Claude Code 个人配置（含本机路径白名单，勿提交；commands/ skills/ 保留）
+.claude/settings.json
+.claude/settings.local.json
+
+# 个人面试准备材料（与本项目无关，勿提交）
+docs/面试准备-*

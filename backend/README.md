@@ -1,16 +1,25 @@
 # 求职 Copilot 后端服务
 
-基于 FastAPI 的 AI 求职教练后端服务，提供用户认证、JD 匹配、简历优化等 API。
+基于 **FastAPI + LangGraph** 的 AI 求职教练后端：用户认证、简历解析、JD 匹配、简历优化、模拟面试、面经库 RAG、语音转写。
+
+> 想看项目全貌和前后端一起启动的步骤，请先读[根目录 README](../README.md)。本文件只讲后端。
+
+---
 
 ## 技术栈
 
-- **FastAPI** - 现代化 Python Web 框架
-- **SQLAlchemy** - ORM 数据库操作
-- **SQLite** - 轻量级数据库（开发环境）
-- **Pydantic** - 数据验证
-- **passlib** - 密码哈希（bcrypt）
-- **python-jose** - JWT 处理
-- **slowapi** - API 限流
+| 层 | 选型 |
+|---|---|
+| Web 框架 | FastAPI + uvicorn |
+| Agent 编排 | **LangGraph**（状态机）· LangChain `ChatOpenAI` |
+| 数据库 | SQLAlchemy + SQLite（业务库）· LangGraph `SqliteSaver`（会话状态库） |
+| 认证 | JWT（python-jose）+ bcrypt（passlib）+ 邮箱验证码 |
+| 限流 | slowapi（IP 级） |
+| 语音 | faster-whisper（本地转写）· PyAV 解码音频（**无需系统 ffmpeg**） |
+| RAG | 智谱 embedding + numpy 余弦相似度 + rank_bm25 |
+| PDF 导出 | playwright（服务端渲染 A4） |
+
+---
 
 ## 快速开始
 
@@ -18,267 +27,146 @@
 
 ```bash
 cd backend
+python -m venv .venv
+source .venv/Scripts/activate      # Git Bash；PowerShell: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+python -m playwright install chromium   # 简历 PDF 导出用，约 150MB，只需装一次
 ```
 
 ### 2. 配置环境变量
 
-已提供 `.env` 文件，包含默认配置：
+模板在**仓库根目录**，复制到 `backend/.env`：
 
 ```bash
-# 数据库
-DATABASE_URL=sqlite:///./job_copilot.db
-
-# JWT
-JWT_SECRET_KEY=your-super-secret-jwt-key-change-this-in-production-min-32-chars
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_DAYS=7
-
-# 环境
-ENV=development
-
-# CORS
-FRONTEND_URL=http://localhost:3000
-
-# 限流
-RATE_LIMIT_GLOBAL="100/minute"
-RATE_LIMIT_SEND_CODE="5/minute"
+cp ../.env.example .env            # Git Bash；PowerShell: Copy-Item ..\.env.example .env
 ```
 
-⚠️ **生产环境请修改 `JWT_SECRET_KEY` 为强随机字符串！**
+然后至少填 `LLM_API_KEY`（默认服务商是智谱，[注册](https://open.bigmodel.cn/)有免费额度）。
+完整变量说明见 [`.env.example`](../.env.example) 内的注释。实际被读取的变量：
 
-### 3. 初始化数据库
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `LLM_API_KEY` | 无（**必填**） | 未配置时 LLM 调用会抛 `ValueError` |
+| `LLM_BASE_URL` | 按模型名匹配 | 服务商 OpenAI 兼容接口地址 |
+| `LLM_MODEL` | `deepseek-chat` | 快档模型（延迟敏感：评估、对话） |
+| `LLM_MODEL_STRONG` | `glm-4.5` | 主力档模型（质量敏感：出题、复盘、解析） |
+| `PORT` | `8000` | ⚠️ 本地请设为 **8001**（前端代理指向 8001） |
+| `HOST` | `0.0.0.0` | 监听地址 |
+| `FRONTEND_URL` | `http://localhost:3000` | CORS 白名单 |
+| `ENV` | `development` | 非 production 时验证码打印到控制台 |
+| `JWT_SECRET_KEY` | 代码内开发用默认值 | **上线必须换成强随机字符串** |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Access Token 有效期 |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh Token 有效期 |
+| `REMEMBER_ME_REFRESH_TOKEN_DAYS` | `30` | 勾选「记住我」时的有效期 |
+| `DATABASE_URL` | `sqlite:///./job_copilot.db` | 业务库连接串 |
+| `WHISPER_MODEL` | `small` | 语音模型：tiny / small / medium |
+
+> 端口：代码里 `PORT` 的默认值是 `8000`，但**前端 vite 代理写死指向 8001**（见 [web/vite.config.ts](../web/vite.config.ts)）。所以必须用模板里的 `PORT=8001`，否则前端所有接口连不上。
+> 限流阈值目前在 [core/limiter.py](src/core/limiter.py) 里硬编码（不读 `.env`）。
+
+### 3. 启动
 
 ```bash
-# 方法 1：使用 Python 脚本（推荐）
-python -c "from src.models.base import Base, engine; Base.metadata.create_all(bind=engine); print('数据库初始化完成')"
-
-# 方法 2：使用 Alembic（需要先安装）
-# alembic upgrade head
+python -m src.main        # 开发模式（热重载）；服务在 http://localhost:8001
 ```
 
-### 4. 启动服务
+> ⚠️ 必须用 **`python -m src.main`**（模块方式）。写成 `python src/main.py` 会把 `backend/src` 当成根目录，直接报 `ModuleNotFoundError: No module named 'src'`。
+>
+> 也可以：`uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload`
 
-```bash
-# 开发模式（支持热重载）
-python src/main.py
+- Swagger UI：http://localhost:8001/docs
+- 健康检查：http://localhost:8001/health
 
-# 或使用 uvicorn
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-```
+**首次启动会自动建表**，无需手动初始化：入口处调用 `Base.metadata.create_all`，并对已存在的表做轻量补列迁移（见 [src/main.py](src/main.py)）。
 
-服务将在 **http://localhost:8000** 启动
+---
 
-### 5. 访问文档
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **健康检查**: http://localhost:8000/health
-
-## API 端点
-
-### 认证接口（`/auth/*`）
-
-| 方法 | 端点 | 描述 | 是否需要认证 |
-|------|------|------|--------------|
-| POST | `/auth/register` | 用户注册 | ❌ |
-| POST | `/auth/login` | 用户登录 | ❌ |
-| POST | `/auth/send-code` | 发送验证码 | ❌ |
-| POST | `/auth/logout` | 退出登录 | ✅ |
-| POST | `/auth/refresh` | 刷新 Token | ❌ |
-
-### 其他端点
-
-| 方法 | 端点 | 描述 |
-|------|------|------|
-| GET | `/` | API 根路径 |
-| GET | `/health` | 健康检查 |
-
-## 项目结构
+## 目录结构
 
 ```
 backend/
 ├── src/
-│   ├── main.py              # FastAPI 应用入口
-│   ├── models/              # 数据库模型
-│   │   ├── base.py          # SQLAlchemy Base 类
-│   │   └── user.py          # User, VerificationCode, RefreshToken
-│   ├── schemas/             # Pydantic 数据模型
-│   │   ├── auth.py          # 认证请求/响应
-│   │   └── user.py          # 用户信息
-│   ├── core/                # 核心功能
-│   │   ├── security.py      # 密码哈希 + JWT
-│   │   ├── deps.py          # 依赖注入
-│   │   └── limiter.py       # API 限流
-│   ├── services/            # 业务逻辑
-│   │   ├── auth_service.py  # 认证服务
-│   │   └── code_service.py  # 验证码服务
-│   └── api/                 # API 路由
-│       └── auth.py          # 认证路由
-├── requirements.txt         # Python 依赖
-├── .env                     # 环境变量
-└── README.md               # 本文件
+│   ├── main.py              # FastAPI 入口：建表、CORS、限流、注册路由
+│   ├── api/                 # 路由层（HTTP 边界）
+│   │   ├── auth.py          #   认证
+│   │   ├── resume.py        #   简历解析 / 画像 / 头像 / 导出
+│   │   ├── resume_optimize.py #  简历优化 + 精修（SSE 流式）
+│   │   ├── jd.py            #   JD 匹配（SSE 流式 + 增量补充）
+│   │   ├── interview.py     #   模拟面试会话
+│   │   ├── voice.py         #   语音转写
+│   │   └── knowledge.py     #   面经库
+│   ├── graph/               # LangGraph 核心
+│   │   ├── graph.py         #   主图（意图路由 + 四条流程）
+│   │   ├── state.py         #   状态定义
+│   │   ├── nodes/           #   节点：profile / jd_match / resume_optimize / resume_refine / mock_interview
+│   │   ├── checkpointer.py  #   会话状态持久化（SqliteSaver）
+│   │   ├── config.py        #   LLM 初始化 + 分层选模
+│   │   └── prompts.py       #   Prompt 集中管理
+│   ├── services/            # 业务逻辑（解析/匹配/出题/复盘/RAG/语音/导出/校验）
+│   ├── models/              # SQLAlchemy 数据模型
+│   ├── schemas/             # Pydantic 请求/响应
+│   └── core/                # 安全(JWT/bcrypt)、限流、日志、SSE 工具
+├── test_*.py                # 分阶段验证脚本（见下）
+├── requirements.txt
+└── README.md
 ```
 
-## 核心功能
+---
 
-### ✅ 用户认证
-- 邮箱 + 密码登录
-- 邮箱验证码注册
-- JWT Token 认证
-- Refresh Token 自动刷新
+## API 概览
 
-### ✅ 安全机制
-- 密码 bcrypt 哈希（成本因子 12）
-- JWT Token 签名验证
-- API 限流（防 DDoS）
-- CORS 跨域保护
+所有路由统一挂在 `/api` 下，前端通过 vite 代理访问。
 
-### ✅ 验证码系统
-- 6 位数字验证码
-- 5 分钟有效期
-- 一次性使用
-- 开发环境打印到控制台
+| 分组 | 前缀 | 主要端点 |
+|---|---|---|
+| 认证 | `/api/auth` | `POST /register`、`/login`、`/send-code`、`/logout`、`/refresh` |
+| 简历解析 | `/api/resume` | `POST /parse-file`、`/parse-text`、`/parse-stream`、`POST /update-profile`、`POST /avatar`、`GET /profile` |
+| 简历优化 | `/api/resume` | `POST /generate`、`GET /list`、`GET /{id}`、`GET /{id}/pdf`、`POST /{id}/refine`、`/{id}/refine-stream`、`/{id}/finalize` |
+| JD 匹配 | `/api/jd` | `POST /match`、`POST /{id}/enrich`、`GET /history`、`GET /results/{id}` |
+| 模拟面试 | `/api/interview` | `POST /sessions`、`POST /sessions/{id}/answer`、`GET /sessions/{id}`、`GET /sessions/{id}/debrief` |
+| 语音转写 | `/api/interview/voice` | `POST /transcribe` |
+| 面经库 | `/api/knowledge` | `GET /personal`、`/personal/weakness`、`GET /company`、`POST /company/ugc` |
 
-## 开发指南
+---
 
-### 添加新的 API 端点
+## 数据存储
 
-1. 在 `src/schemas/` 创建请求/响应模型
-2. 在 `src/services/` 创建业务逻辑
-3. 在 `src/api/` 创建路由
-4. 在 `src/main.py` 注册路由
+| 库文件 | 内容 | 生成方式 |
+|---|---|---|
+| `backend/job_copilot.db` | 业务资产：用户、画像、JD 匹配、简历、面经 | 启动时 `create_all` 自动建表 |
+| `backend/interview_checkpoints.db` | 会话状态：面试进度、精修草稿 | LangGraph `SqliteSaver` 运行时写入 |
 
-示例：
+两者已在 `.gitignore` 排除。重置数据库：删掉对应的 `.db` 文件后重启即可。
 
-```python
-# src/api/users.py
-from fastapi import APIRouter, Depends
-from src.core.deps import get_current_user
+---
 
-user_router = APIRouter()
+## 关于 `test_*.py`
 
-@user_router.get("/me")
-async def get_profile(current_user = Depends(get_current_user)):
-    return current_user
-```
+`backend/` 根目录下的 `test_*.py` **不是单元测试套件**，而是开发过程中**分阶段的验证脚本**（命名带 `_spike` / `_smoke` / `_e2e` 的尤其明显）：它们需要真实 LLM Key 和数据库，用于验证某个能力在真实链路上跑得通（如 `test_interrupt_spike.py` 验证 interrupt 行为、`test_rag_integration.py` 验证 RAG 数据飞轮）。
 
-### 数据库操作
-
-使用 SQLAlchemy ORM：
-
-```python
-from src.models.base import get_db
-from src.models.user import User
-from sqlalchemy.orm import Session
-
-def get_user_by_email(db: Session, email: str):
-    return db.query(User).filter(User.email == email).first()
-```
-
-### 环境变量
-
-使用 `python-dotenv` 读取：
-
-```python
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-secret_key = os.getenv("JWT_SECRET_KEY")
-```
-
-## 生产部署
-
-### 1. 修改配置
+运行方式（在 `backend/` 目录下，用模块方式，保证 `import src` 可用）：
 
 ```bash
-# .env
-ENV=production
-DATABASE_URL=postgresql://user:pass@localhost/dbname
-JWT_SECRET_KEY=<强随机字符串>
+python -m test_rag_integration        # 注意：不是 python test_rag_integration.py
 ```
 
-### 2. 切换数据库
+正式的自动化测试在前端：[web/tests/e2e/](../web/tests/e2e/)（Playwright 端到端）。
 
-修改 `DATABASE_URL` 为 PostgreSQL，无需改代码：
-
-```python
-# SQLite
-DATABASE_URL=sqlite:///./job_copilot.db
-
-# PostgreSQL
-DATABASE_URL=postgresql://user:pass@localhost/dbname
-```
-
-### 3. 使用 Gunicorn 运行
-
-```bash
-pip install gunicorn
-gunicorn src.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
-```
-
-### 4. Docker 部署（可选）
-
-```dockerfile
-FROM python:3.10-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD ["gunicorn", "src.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker"]
-```
+---
 
 ## 常见问题
 
-### Q: 如何重置数据库？
+**Q：注册时验证码在哪？**
+开发环境（`ENV=development`，默认）会把验证码打印到后端控制台，见 [services/code_service.py](src/services/code_service.py)。
 
-```bash
-rm job_copilot.db
-python -c "from src.models.base import Base, engine; Base.metadata.create_all(bind=engine)"
-```
+**Q：Token 有效期？**
+Access Token 15 分钟，Refresh Token 7 天（勾选「记住我」30 天），前端会自动刷新。
 
-### Q: 如何查看验证码？
+**Q：换了 LLM 服务商要改代码吗？**
+不用。改 `.env` 里的 `LLM_BASE_URL` + `LLM_MODEL` + `LLM_MODEL_STRONG` + Key 即可。
 
-开发环境，验证码会打印到后端控制台：
+**Q：语音转写需要装 ffmpeg 吗？**
+不需要。音频解码走 PyAV（由 faster-whisper 的依赖带入）。
 
-```
-==================================================
-📧 验证码发送到: zhangsan@example.com
-🔢 验证码: 123456
-⏰ 有效期: 5 分钟
-==================================================
-```
-
-### Q: Token 默认有效期是多少？
-
-- **Access Token**: 15 分钟
-- **Refresh Token**: 7 天
-
-可在 `.env` 修改：
-
-```bash
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-REFRESH_TOKEN_EXPIRE_DAYS=30
-```
-
-### Q: 如何测试 API？
-
-使用 Swagger UI（http://localhost:8000/docs）或 curl：
-
-```bash
-# 发送验证码
-curl -X POST http://localhost:8000/auth/send-code \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com"}'
-
-# 登录
-curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "password": "password123"}'
-```
-
-## 许可证
-
-MIT
+**Q：限流能按用户吗？**
+目前只有 IP 级全局限流，用户级限流未实现（见 [core/limiter.py](src/core/limiter.py) 的 `get_user_id`）。

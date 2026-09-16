@@ -20,6 +20,33 @@
 
 ---
 
+## 界面速览
+
+**① 首页 · 求职作战看板** —— 四步闭环的进度可视化 + 「下一步做什么」引导
+
+<img src="docs/screenshots/01-home.png" width="800">
+
+**② JD 匹配 · 匹配度 + 差距清单** —— 四维打分 + 按严重度排序的 Gap 与应对建议（结果分两阶段流式产出：先出分数与维度，再逐条补齐差距建议）
+
+<img src="docs/screenshots/02-jd-match.png" width="800">
+
+<details>
+<summary>展开：流式过程中的中间态（差距建议逐条补齐）</summary>
+
+<img src="docs/screenshots/03-jd-match-streaming.png" width="800">
+
+</details>
+
+**③ 模拟面试 · 面试配置** —— 题型 / 时长档位 / 实战与教练两种模式 / 六档面试官风格 / 文字与语音作答
+
+<img src="docs/screenshots/04-interview-setup.png" width="800">
+
+**④ 面经库 · RAG 检索** —— 个人面经沉淀 + 公司真题，语义检索反哺出题与复盘
+
+<img src="docs/screenshots/05-experience-library.png" width="800">
+
+---
+
 ## 技术架构
 
 ### 后端（[backend/](backend/)）
@@ -55,7 +82,7 @@
 cp .env.example backend/.env     # Git Bash；PowerShell 用 Copy-Item .env.example backend/.env
 ```
 
-编辑 `backend/.env`，至少填：
+编辑 `backend/.env`，**唯一必填的是 `LLM_API_KEY`**，其余都有可用默认值：
 
 ```bash
 LLM_API_KEY=你的智谱Key          # 注册：https://open.bigmodel.cn/
@@ -64,15 +91,24 @@ LLM_MODEL=glm-4-flash            # 快档（评估/对话）
 LLM_MODEL_STRONG=glm-4.5         # 主力档（出题/复盘/简历/JD 解析）
 ```
 
-> 想用 DeepSeek / OpenAI / 通义？只改这三行（`LLM_BASE_URL` + `LLM_MODEL` + Key），代码不用动。
+> ⚠️ `PORT` 保持模板里的 **8001**——前端 vite 代理写死指向 8001（见 [web/vite.config.ts](web/vite.config.ts)），改成别的端口前端就连不上。
+>
+> 想用 DeepSeek / OpenAI / 通义？只改 `LLM_BASE_URL` + 两个模型名 + Key，代码不用动。
 
 ### 2. 启动后端
 
 ```bash
 cd backend
+python -m venv .venv            # 建议用虚拟环境（首次）
+source .venv/Scripts/activate   # Git Bash；PowerShell 用 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python src/main.py               # 首次启动会自动建表；服务在 http://localhost:8001
+python -m playwright install chromium   # 简历 PDF 导出用（约 150MB，只需装一次）
+python -m src.main               # 首次启动会自动建表；服务在 http://localhost:8001
 ```
+
+> 启动命令是 `python -m src.main`（**模块**方式）。不要写成 `python src/main.py`——后者会把 `backend/src` 当成根目录，直接报 `ModuleNotFoundError: No module named 'src'`。
+>
+> 首次装依赖会偏慢：`faster-whisper`（语音转写）会带上 ctranslate2 / onnxruntime 等较大的包。
 
 - API 文档（Swagger）：http://localhost:8001/docs
 - 健康检查：http://localhost:8001/health
@@ -120,10 +156,17 @@ job-copilot/
 │   │   └── styles/               # 全局样式 / 设计 token
 │   └── tests/e2e/                # Playwright 端到端测试
 ├── docs/                         # 产品方案 / 技术架构 / 行动计划 / 前端需求
+│   └── screenshots/              # README 用的界面截图
 ├── openspec/                     # 规范驱动开发（先写 spec 再实现）
+├── amlei-resume/                 # 简历能力的参考实现来源（非运行时依赖，见其 README）
 ├── src/                          # 早期 CLI 原型（已被 backend+web 全栈版本取代，仅留档）
-└── .env.example                  # LLM 配置模板
+├── backend/test_*.py             # 分阶段验证脚本（非单元测试，见 backend/README.md）
+├── LICENSE
+└── .env.example                  # 环境变量模板（复制为 backend/.env）
 ```
+
+> `backend/` 根目录下的 `test_*.py` 是开发过程中**分阶段的验证脚本**（需要真实 LLM Key，用来验证某条链路在真实环境跑得通），不是单元测试套件；正式的自动化测试在前端的 `web/tests/e2e/`。
+
 
 ---
 
@@ -168,13 +211,25 @@ job-copilot/
 
 ---
 
+## 已知限制
+
+如实列出，避免"看起来什么都能做"：
+
+- **未部署上线**：`web/.env.production` 里的 API 域名是占位值，目前只能在本地跑。
+- **限流仅 IP 级**：用户级限流未实现（见 [core/limiter.py](backend/src/core/limiter.py)）。
+- **验证码不真发邮件**：开发环境打印到后端控制台，邮件通道留了接口未接（见 [code_service.py](backend/src/services/code_service.py)）。
+- **SQLite 单机**：适合个人使用与演示，非并发场景。
+- **语音转写是 CPU 推理**：`faster-whisper` small 模型在 CPU 上约数倍于音频时长，长回答会有等待。
+
+---
+
 ## 相关文档
 
 - 📄 [产品方案](docs/产品方案.md) — PRD + 商业分析 + AI 能力边界（面试主讲）
-- 🏗️ [技术架构](docs/技术架构.md) — 技术设计与面试讲点
-- 📅 [行动计划](docs/行动计划.md) — 开发路线图（早期文档，部分内容与现状有出入）
+- 🏗️ [技术架构](docs/技术架构.md) — 架构设计与面试讲点（含三张状态机的说明）
+- 📅 [行动计划](docs/行动计划.md) — 开发前的路线图（**历史文档**，与现状有出入）
 - 🔧 [后端 README](backend/README.md) · [前端 README](web/README.md)
 
 ---
 
-*这是一个个人面试作品集项目，用于求职展示。* License: MIT
+*这是一个个人面试作品集项目，用于求职展示。* License: [MIT](LICENSE)

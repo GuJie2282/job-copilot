@@ -54,6 +54,7 @@ langgraph-checkpoint-sqlite==2.0.11  # 模拟面试会话状态持久化（抗�
 # - 不用 chromadb：其依赖 chroma-hnswlib 在 Windows 需 MSVC 编译，对部署不友好；
 #   面经库数据量极小（百级），numpy 检索足够且更透明（诚实的技术判断，design 原则 3）
 rank_bm25>=0.2.2
+numpy>=1.24.0  # 向量检索（余弦相似度）直接 import，必须显式声明，不能只靠传递依赖
 
 # Task Scheduling (for file cleanup)
 apscheduler==3.11.0

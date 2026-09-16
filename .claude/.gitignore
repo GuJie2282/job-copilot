@@ -1,8 +1,11 @@
 # Claude Code 项目配置
 # =====================
+# 纳入版本管理的：commands/（自定义指令）、skills/（技能）、README.md
+# 不纳入的：settings.json（含本机绝对路径的权限白名单）、memory/（个人记忆）
 
-# 记忆文件（用户个人数据）
-memory/*.md
+settings.json
+settings.local.json
+memory/
 
 # 技能脚本（可包含敏感信息）
 skills/*.md
@@ -11,7 +14,4 @@ skills/*.md
 *.tmp
 *.log
 
-# 但保留配置文件和索引
-!settings.json
 !README.md
-!memory/MEMORY.md

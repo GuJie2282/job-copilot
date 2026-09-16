@@ -132,10 +132,6 @@ app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 from src.api.resume import resume_router
 app.include_router(resume_router, prefix="/api/resume", tags=["简历解析"])
 
-# TODO: 注册用户路由
-# from src.api.users import user_router
-# app.include_router(user_router, prefix="/users", tags=["用户"])
-
 # 注册 JD 匹配路由
 from src.api.jd import jd_router
 app.include_router(jd_router, prefix="/api/jd", tags=["JD 匹配"])

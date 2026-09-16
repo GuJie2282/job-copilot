@@ -64,14 +64,30 @@ npm run preview
 
 ## 功能特性
 
-- ✅ 用户登录/注册
-- ✅ 验证码验证
-- ✅ JWT 身份验证
-- ✅ 响应式设计
-- ✅ TypeScript 严格模式
-- ✅ 路由守卫
-- ✅ API 错误处理
-- ✅ 现代化简约设计
+- ✅ 用户登录/注册 + 验证码 + JWT 身份验证
+- ✅ 简历解析 / 画像编辑（上传 PDF·Word 或粘贴文本）
+- ✅ JD 匹配（匹配度 + 维度打分 + 差距清单，SSE 流式增量渲染）
+- ✅ 简历优化 / 精修工作台 / 历史版本 / 多主题 PDF 导出
+- ✅ 模拟面试（配置 → 面试间 → 复盘报告；文字与语音作答）
+- ✅ 面经库（个人沉淀 + 公司真题，语义检索）
+- ✅ 响应式设计（桌面 / 移动端）· TypeScript 严格模式 · 路由守卫 · API 错误处理
+
+## 目录结构
+
+```
+web/
+├── src/
+│   ├── views/          # 页面：登录/注册/首页/画像/JD匹配/简历×4/面试×4/面经库
+│   ├── components/     # 公共组件
+│   ├── api/            # 接口层（axios 封装，含 SSE 流式请求）
+│   ├── stores/         # Pinia 状态
+│   ├── router/         # 路由 + 守卫
+│   ├── styles/         # 全局样式 / 设计 token
+│   └── types/          # TypeScript 类型
+└── tests/e2e/          # Playwright 端到端测试
+```
+
+> 前端依赖后端：请先在 `../backend` 启动 8001 端口的服务，否则页面接口全部报错。
 
 ## 设计规范
 
@@ -93,15 +109,15 @@ npm run preview
 
 ## 环境变量
 
-### 开发环境 (.env.development)
-```
-VITE_API_BASE_URL=http://localhost:8000/api
-```
+| 文件 | 变量 | 值 | 说明 |
+|---|---|---|---|
+| `.env.development` | `VITE_API_BASE_URL` | `/api` | 普通 JSON 请求走 vite dev proxy → `localhost:8001` |
+| `.env.development` | `VITE_STREAM_BASE_URL` | `http://localhost:8001/api` | SSE 流式请求直连后端（vite proxy 不转发 `text/event-stream`） |
+| `.env.production` | `VITE_API_BASE_URL` | `https://api.jobcopilot.com/api` | **占位值，项目尚未部署**，上线时需改成真实域名 |
 
-### 生产环境 (.env.production)
-```
-VITE_API_BASE_URL=https://api.jobcopilot.com/api
-```
+> 为什么流式请求要绕开 proxy：vite dev proxy 会把 `text/event-stream` 缓冲住（实测 150s 透传 0 字节、连接挂起），所以 SSE 端点直连后端，其余请求仍走 proxy。
+>
+> 内网穿透（cpolar 等）联调时会用 `--mode cpolar` 启动，配置见 `.env.cpolar`（含个人隧道地址，未纳入版本管理）。
 
 ## 浏览器支持
 
