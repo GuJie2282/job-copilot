@@ -67,7 +67,8 @@ job-copilot/
 ├── web/                   # 前端：Vue 3 + TS
 │   ├── src/{views,api,stores,router,styles,components,types}
 │   └── tests/e2e/         # Playwright 端到端测试
-├── docs/                  # 产品方案 / 技术架构 / 行动计划 / 前端需求 / screenshots
+├── assets/screenshots/    # README 用的界面截图
+├── docs/                  # 产品/架构文档（**本地维护，已 gitignore，不提交**）
 ├── openspec/              # 规范驱动开发（先写 spec 再实现）
 ├── amlei-resume/          # 简历能力的参考实现来源（非运行时依赖，见其 README）
 └── src/                   # 早期 CLI 原型（仅留档）
@@ -113,7 +114,7 @@ cd web && npm install && npm run dev       # http://localhost:3000
 - **回边**：简历优化里 `resume_evaluate`/`resume_validate` 不通过会回到 `resume_generate` 重写——把"反思-修正"做成图上的环。
 - **interrupt + checkpointer**：面试子图与简历精修子图用它实现"跨 HTTP 请求等用户输入 + 抗进程重启"。`thread_id` 决定恢复哪条会话。
 
-**三张图**（详见 [docs/技术架构.md](docs/技术架构.md)）：
+**三张图**（设计细节见 `docs/技术架构.md`，该文档仅本地维护、未纳入版本管理）：
 
 | 图 | 位置 | 范式 |
 |---|---|---|
@@ -193,8 +194,8 @@ builder.add_edge("router", "foo")     # 或加条件边做路由
 ## 相关文档
 
 - [README](README.md) — 对外说明 + 快速开始（面试官视角）
-- [产品方案](docs/产品方案.md) — PRD + 商业分析 + AI 能力边界（面试主讲）
-- [技术架构](docs/技术架构.md) — 架构设计与面试讲点（已对齐现状）
-- [行动计划](docs/行动计划.md) — 开发前的路线图（**历史文档**，与现状有出入）
-- [前端页面需求](docs/前端页面需求.md) — 前端需求（**历史文档**）
 - [backend/README.md](backend/README.md) · [web/README.md](web/README.md)
+- `docs/` 下的产品方案 / 技术架构 / 行动计划 / 前端页面需求 —— **本地维护，已 gitignore，不提交**
+
+> ⚠️ `docs/` 不纳入版本管理：涉及它的改动（例如新增文档）不要 `git add -f` 绕过。
+> 界面截图放 `assets/screenshots/`（这个目录是入库的）。

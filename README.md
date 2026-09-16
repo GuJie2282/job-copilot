@@ -24,26 +24,26 @@
 
 **① 首页 · 求职作战看板** —— 四步闭环的进度可视化 + 「下一步做什么」引导
 
-<img src="docs/screenshots/01-home.png" width="800">
+<img src="assets/screenshots/01-home.png" width="800">
 
 **② JD 匹配 · 匹配度 + 差距清单** —— 四维打分 + 按严重度排序的 Gap 与应对建议（结果分两阶段流式产出：先出分数与维度，再逐条补齐差距建议）
 
-<img src="docs/screenshots/02-jd-match.png" width="800">
+<img src="assets/screenshots/02-jd-match.png" width="800">
 
 <details>
 <summary>展开：流式过程中的中间态（差距建议逐条补齐）</summary>
 
-<img src="docs/screenshots/03-jd-match-streaming.png" width="800">
+<img src="assets/screenshots/03-jd-match-streaming.png" width="800">
 
 </details>
 
 **③ 模拟面试 · 面试配置** —— 题型 / 时长档位 / 实战与教练两种模式 / 六档面试官风格 / 文字与语音作答
 
-<img src="docs/screenshots/04-interview-setup.png" width="800">
+<img src="assets/screenshots/04-interview-setup.png" width="800">
 
 **④ 面经库 · RAG 检索** —— 个人面经沉淀 + 公司真题，语义检索反哺出题与复盘
 
-<img src="docs/screenshots/05-experience-library.png" width="800">
+<img src="assets/screenshots/05-experience-library.png" width="800">
 
 ---
 
@@ -57,7 +57,7 @@
 - **语音**：本地 **faster-whisper** 转写，零侵入接入面试链路
 - **RAG**：**numpy + 智谱 embedding** 做向量检索的轻量面经库（生产可换专用向量库）
 
-> **为什么用 LangGraph？** 它把 Agent 的「流程」显式建模成**状态机**（节点 = 函数，边 = 流转），可控、可调试、可断点续跑——比裸调 API 更能体现工程能力。详见 [技术架构](docs/技术架构.md)。
+> **为什么用 LangGraph？** 它把 Agent 的「流程」显式建模成**状态机**（节点 = 函数，边 = 流转），可控、可调试、可断点续跑——比裸调 API 更能体现工程能力。三张状态机（主图 / 面试子图 / 简历精修子图）的分工见下面的「AI 核心设计」，实现细节见 [backend/README.md](backend/README.md)。
 
 ### 前端（[web/](web/)）
 
@@ -155,8 +155,7 @@ job-copilot/
 │   │   ├── router/               # 路由 + 守卫
 │   │   └── styles/               # 全局样式 / 设计 token
 │   └── tests/e2e/                # Playwright 端到端测试
-├── docs/                         # 产品方案 / 技术架构 / 行动计划 / 前端需求
-│   └── screenshots/              # README 用的界面截图
+├── assets/screenshots/           # README 用的界面截图
 ├── openspec/                     # 规范驱动开发（先写 spec 再实现）
 ├── amlei-resume/                 # 简历能力的参考实现来源（非运行时依赖，见其 README）
 ├── src/                          # 早期 CLI 原型（已被 backend+web 全栈版本取代，仅留档）
@@ -225,10 +224,11 @@ job-copilot/
 
 ## 相关文档
 
-- 📄 [产品方案](docs/产品方案.md) — PRD + 商业分析 + AI 能力边界（面试主讲）
-- 🏗️ [技术架构](docs/技术架构.md) — 架构设计与面试讲点（含三张状态机的说明）
-- 📅 [行动计划](docs/行动计划.md) — 开发前的路线图（**历史文档**，与现状有出入）
-- 🔧 [后端 README](backend/README.md) · [前端 README](web/README.md)
+- 🔧 [后端 README](backend/README.md) — 启动方式、环境变量、真实 API 路由表、数据存储
+- 🎨 [前端 README](web/README.md) — 功能特性、目录结构、开发与测试
+- 📐 [openspec/](openspec/) — 规范驱动开发的过程记录（每个能力先写 spec 再实现）
+
+> 产品方案（PRD / 商业分析 / AI 能力边界）与技术架构设计文档在本地单独维护，未随仓库公开。
 
 ---
 

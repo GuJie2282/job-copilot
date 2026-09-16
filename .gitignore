@@ -45,10 +45,12 @@ web/.verify/
 
 # 内网穿透隧道配置（含个人隧道地址，勿提交）
 web/.env.cpolar
+web/.env.tunnel
 
 # Claude Code 个人配置（含本机路径白名单，勿提交；commands/ skills/ 保留）
 .claude/settings.json
 .claude/settings.local.json
 
-# 个人面试准备材料（与本项目无关，勿提交）
-docs/面试准备-*
+# 产品文档与设计稿（本地维护，不公开到仓库；界面截图见 assets/screenshots/）
+# 这一条同时覆盖了 docs/ 下的个人面试准备材料（与本项目无关）
+docs/

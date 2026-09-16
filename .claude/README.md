@@ -101,4 +101,4 @@ npm run test
 - [Claude Code 官方文档](https://docs.anthropic.com/claude-code)
 - [settings.json 架构](https://raw.githubusercontent.com/Anthropic/claude-code/main/settings-schema.json)
 - [项目 CLAUDE.md](../CLAUDE.md)
-- [前端开发规范](../docs/前端页面需求.md)
+- [前端 README](../web/README.md)

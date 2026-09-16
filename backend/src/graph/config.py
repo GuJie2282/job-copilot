@@ -22,24 +22,32 @@ from pydantic import BaseModel
 # ============================================================================
 
 # 默认配置
-DEFAULT_MODEL = "deepseek-chat"
+# 注意：DEFAULT_MODEL 只是「.env 里没写 LLM_MODEL 时」的最后兜底，正常都以 .env 为准。
+# 换服务商或换型号都不需要改这个文件 —— 见下面的 GENERIC_CONFIG。
+DEFAULT_MODEL = "deepseek-flash"
 DEFAULT_TEMPERATURE = 0.0  # 简历解析需要确定性输出
 DEFAULT_MAX_TOKENS = 4096
 
-# 支持的模型配置
+# 已知模型配置表。
+# base_url 的优先级：.env 的 LLM_BASE_URL > 这里的 base_url（这样换服务商只改 .env）
 MODEL_CONFIGS = {
-    "deepseek-chat": {
+    # ---------------- DeepSeek ----------------
+    # 2026-09 实测：DeepSeek 的 /models 接口只返回下面这两个 ID
+    # （旧的 deepseek-chat / deepseek-reasoner 别名已下线，写了会报模型不存在）
+    "deepseek-flash": {
         "base_url": "https://api.deepseek.com",
         "api_key_env": "LLM_API_KEY",
         "default_temperature": 0.0,
         "default_max_tokens": 4096,
     },
-    "gpt-4o-mini": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
+    "deepseek-v4-pro": {
+        # 主力档：质量敏感任务（出题/复盘/简历解析/JD 解析）。与 flash 共用 base_url + key
+        "base_url": "https://api.deepseek.com",
+        "api_key_env": "LLM_API_KEY",
         "default_temperature": 0.0,
         "default_max_tokens": 4096,
     },
+    # ---------------- 智谱 GLM ----------------
     "glm-4-flash": {
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
         "api_key_env": "LLM_API_KEY",
@@ -47,12 +55,28 @@ MODEL_CONFIGS = {
         "default_max_tokens": 4096,
     },
     "glm-4.5": {
-        # 主力档：质量敏感任务（出题/复盘/简历解析/JD 解析）。与 flash 共用智谱 base_url + key
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
         "api_key_env": "LLM_API_KEY",
         "default_temperature": 0.0,
         "default_max_tokens": 4096,
     },
+    # ---------------- OpenAI ----------------
+    "gpt-4o-mini": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "default_temperature": 0.0,
+        "default_max_tokens": 4096,
+    },
+}
+
+# 不在上面表里的模型（服务商新出的型号）走这份兜底配置。
+# base_url 为 None 表示「必须以 .env 的 LLM_BASE_URL 为准」——因为此时我们并不知道
+# 这个型号属于哪家服务商，乱猜一个地址只会得到一个莫名其妙的 401/404。
+GENERIC_CONFIG = {
+    "base_url": None,
+    "api_key_env": "LLM_API_KEY",
+    "default_temperature": 0.0,
+    "default_max_tokens": 4096,
 }
 
 
@@ -73,15 +97,16 @@ def get_llm(
     获取 LLM 实例
 
     Args:
-        model: 模型名称（如 "glm-4.5"、"glm-4-flash"）。显式指定时优先级最高，tier 被忽略
+        model: 模型名称（如 "deepseek-v4-pro"、"glm-4.5"）。显式指定时优先级最高，tier 被忽略
         temperature: 温度参数（0.0-1.0，简历解析建议用 0.0）
         max_tokens: 最大生成 tokens
         api_key: API Key（可选，默认从环境变量读取）
         base_url: API Base URL（可选，默认从配置读取）
         timeout: LLM 调用超时（秒）
         tier: 模型档位（仅在 model 未指定时生效）——分层选模，平衡质量与成本/延迟：
-              "fast"   快档（默认，LLM_MODEL=glm-4-flash，免费）：延迟敏感场景（评估、对话）
-              "strong" 主力档（LLM_MODEL_STRONG=glm-4.5）：质量敏感场景（出题、复盘、简历/JD 解析）
+              "fast"   快档（默认，LLM_MODEL=deepseek-flash）：延迟敏感场景（评估、对话）
+              "strong" 主力档（LLM_MODEL_STRONG=deepseek-v4-pro）：质量敏感场景（出题、复盘、简历/JD 解析）
+              两个档位都从 .env 读，换服务商不用改代码
 
     Returns:
         llm: LLM 实例
@@ -95,14 +120,15 @@ def get_llm(
     # 模型选择优先级：显式 model > tier 对应环境变量 > 默认
     if model is None:
         if tier == "strong":
-            # 主力档：质量敏感任务（出题/复盘/简历解析等）
-            model = os.getenv("LLM_MODEL_STRONG", "glm-4.5")
+            # 主力档：质量敏感任务（出题/复盘/简历解析等）。
+            # 没配 LLM_MODEL_STRONG 时退到快档模型 —— 单模型的服务商只需配一个变量
+            model = os.getenv("LLM_MODEL_STRONG") or os.getenv("LLM_MODEL") or DEFAULT_MODEL
         else:
             # 快档（默认）：延迟敏感任务（评估/对话）
             model = os.getenv("LLM_MODEL", DEFAULT_MODEL)
 
-    # 获取模型配置
-    model_config = MODEL_CONFIGS.get(model, MODEL_CONFIGS[DEFAULT_MODEL])
+    # 获取模型配置（未知型号走 GENERIC_CONFIG，地址/Key 全部以 .env 为准）
+    model_config = MODEL_CONFIGS.get(model, GENERIC_CONFIG)
 
     # 获取 API Key
     if api_key is None:
@@ -115,7 +141,13 @@ def get_llm(
 
     # 获取 Base URL
     if base_url is None:
-        base_url = os.getenv("LLM_BASE_URL", model_config.get("base_url"))
+        base_url = os.getenv("LLM_BASE_URL") or model_config.get("base_url")
+        if not base_url:
+            # 未知型号 + 没配 LLM_BASE_URL：直接报错，好过悄悄打到 OpenAI 官方地址拿个 401
+            raise ValueError(
+                f"Base URL not found for model '{model}'. Please set LLM_BASE_URL "
+                f"in .env (e.g. https://api.deepseek.com or https://open.bigmodel.cn/api/paas/v4)."
+            )
 
     # 创建 LLM 实例
     llm = ChatOpenAI(

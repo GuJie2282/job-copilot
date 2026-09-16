@@ -282,12 +282,12 @@ async def generate_resume_reasoning_stream(
     jd_text: Optional[str] = None,
 ) -> AsyncGenerator[Tuple[str, str], None]:
     """
-    增量生成简历（glm-4.5 reasoning），yield (kind, delta)：
+    增量生成简历（主力档 reasoning），yield (kind, delta)：
       kind="reasoning" —— AI 思考过程（供前端思考区展示）
       kind="content"   —— 简历正文（Markdown）
 
-    用 openai client 直调 glm-4.5 拿 reasoning_content（LangChain 默认丢）。
-    与 generate_resume_stream（LangChain, glm-4-flash, 仅 content）并存。
+    用 openai client 直调主力档（.env 的 LLM_MODEL_STRONG）拿 reasoning_content（LangChain 默认丢）。
+    与 generate_resume_stream（LangChain, 快档, 仅 content）并存。
     """
     if not profile:
         raise ValueError("画像为空，无法生成简历")
@@ -344,12 +344,12 @@ async def refine_resume_reasoning_stream(
     target_position: str,
 ) -> AsyncGenerator[Tuple[str, str], None]:
     """
-    增量精修简历（glm-4.5 reasoning），yield (kind, delta)：
+    增量精修简历（主力档 reasoning），yield (kind, delta)：
       kind="reasoning" —— AI 思考过程（供前端思考区展示）
       kind="content"   —— 自然语言说明 + 改写后简历（prompt 约定用 <<<REPLY>>>/<<<RESUME>>> 分隔）
 
-    用 openai client 直调 glm-4.5 拿 reasoning_content（LangChain 默认丢）。
-    与 refine_resume_stream（LangChain, glm-4-flash, 仅 content）并存。
+    用 openai client 直调主力档（.env 的 LLM_MODEL_STRONG）拿 reasoning_content（LangChain 默认丢）。
+    与 refine_resume_stream（LangChain, 快档, 仅 content）并存。
     """
     if not current_md:
         raise ValueError("当前简历草稿为空，无法精修")
